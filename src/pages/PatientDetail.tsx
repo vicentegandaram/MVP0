@@ -1,0 +1,637 @@
+import { useState } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Scale,
+  Ruler,
+  Activity,
+  Calendar,
+  Utensils,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
+  ChevronRight,
+  Plus,
+  X,
+  Loader2,
+  Pencil
+} from 'lucide-react'
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  AreaChart,
+  Area
+} from 'recharts'
+import { format, differenceInDays } from 'date-fns'
+import { es } from 'date-fns/locale'
+import { usePatient, useMeasurements, useActiveNutritionPlan, useAppointments, useCreateMeasurement } from '../hooks/useApi'
+import type { PatientObjective } from '../types'
+
+const getObjectiveLabel = (obj: PatientObjective): string => {
+  const labels: Record<PatientObjective, string> = {
+    lose_weight: 'Perder peso',
+    gain_weight: 'Ganar peso',
+    maintain: 'Mantener',
+    muscle_gain: 'Ganar músculo',
+    medical: 'Médico'
+  }
+  return labels[obj] || obj
+}
+
+const getObjectiveIcon = (obj: PatientObjective) => {
+  if (obj === 'lose_weight') return <TrendingDown className="h-5 w-5" />
+  if (obj === 'gain_weight' || obj === 'muscle_gain') return <TrendingUp className="h-5 w-5" />
+  return <Activity className="h-5 w-5" />
+}
+
+export function PatientDetailPage() {
+  const { patientId } = useParams<{ patientId: string }>()
+  const [timeRange, setTimeRange] = useState<'7' | '30' | '90'>('30')
+  const [showMeasurementModal, setShowMeasurementModal] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [measurementError, setMeasurementError] = useState<string | null>(null)
+  const [formData, setFormData] = useState({
+    weight: '',
+    height: '',
+    waist_circumference: '',
+    hip_circumference: '',
+    body_fat_percentage: '',
+    muscle_mass: '',
+    notes: ''
+  })
+  
+  const { data: patient, isLoading: loadingPatient } = usePatient(patientId || '')
+  const { data: measurements = [] } = useMeasurements(patientId || '')
+  const { data: activePlan } = useActiveNutritionPlan(patientId || '')
+  const { data: appointments = [] } = useAppointments()
+  const createMeasurement = useCreateMeasurement()
+  
+  const patientAppointments = appointments
+    .filter(a => a.patient_id === patientId)
+    .filter(a => new Date(a.scheduled_at) >= new Date())
+    .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
+    .slice(0, 3)
+  
+  const lastMeasurement = measurements[0]
+  const firstMeasurement = measurements[measurements.length - 1]
+  
+  const weightChange = lastMeasurement && firstMeasurement && lastMeasurement.weight && firstMeasurement.weight
+    ? lastMeasurement.weight - firstMeasurement.weight 
+    : null
+    
+  const daysSinceLastMeasurement = lastMeasurement 
+    ? differenceInDays(new Date(), new Date(lastMeasurement.recorded_at))
+    : null
+
+  const saveMeasurement = async () => {
+    if (!patientId || !formData.weight) return
+
+    setIsSaving(true)
+    setMeasurementError(null)
+    try {
+      await createMeasurement.mutateAsync({
+        patient_id: patientId,
+        weight: parseFloat(formData.weight),
+        height: formData.height ? parseFloat(formData.height) : undefined,
+        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
+        hip_circumference: formData.hip_circumference ? parseFloat(formData.hip_circumference) : undefined,
+        body_fat_percentage: formData.body_fat_percentage ? parseFloat(formData.body_fat_percentage) : undefined,
+        muscle_mass: formData.muscle_mass ? parseFloat(formData.muscle_mass) : undefined,
+        notes: formData.notes || undefined,
+      })
+
+      setShowMeasurementModal(false)
+      setFormData({ weight: '', height: '', waist_circumference: '', hip_circumference: '', body_fat_percentage: '', muscle_mass: '', notes: '' })
+    } catch (error: any) {
+      const msg = error?.message || error?.error?.message || JSON.stringify(error)
+      setMeasurementError(msg.includes('policy') || msg.includes('RLS') || msg.includes('permission')
+        ? 'Sin permisos para guardar. Asegúrate de estar logueado correctamente.'
+        : 'Error al guardar: ' + msg)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const filteredMeasurements = measurements
+    .filter(m => {
+      if (!m.recorded_at) return false
+      const date = new Date(m.recorded_at)
+      const now = new Date()
+      const days = timeRange === '7' ? 7 : timeRange === '30' ? 30 : 90
+      return date >= new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+    })
+    .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime())
+
+  if (loadingPatient) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
+      </div>
+    )
+  }
+
+  if (!patient) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500">Paciente no encontrado</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <Link to="/patients" className="p-2 rounded-lg hover:bg-gray-100">
+          <ArrowLeft className="h-5 w-5 text-gray-600" />
+        </Link>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-gray-900">
+            {patient.name} {patient.last_name}
+          </h1>
+          <p className="text-gray-500">Paciente desde {format(new Date(patient.created_at), 'MMM yyyy', { locale: es })}</p>
+        </div>
+        <div className="flex gap-2">
+          <Link
+            to={`/patients/${patientId}/edit`}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Pencil className="h-4 w-4" />
+            Editar
+          </Link>
+          {activePlan && (
+            <Link
+              to={`/plans/${patientId}/view`}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              <Utensils className="h-4 w-4" />
+              Ver Plan
+            </Link>
+          )}
+          <Link
+            to={`/plans/${patientId}`}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            <Utensils className="h-4 w-4" />
+            Editar Plan
+          </Link>
+        </div>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Ruler className="h-4 w-4" />
+            <span className="text-sm">Altura</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {lastMeasurement?.height ? `${lastMeasurement.height} cm` : '-'}
+          </p>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Scale className="h-4 w-4" />
+            <span className="text-sm">Peso actual</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {lastMeasurement?.weight ? `${lastMeasurement.weight} kg` : '-'}
+          </p>
+          {weightChange !== null && (
+            <p className={`text-xs mt-1 ${weightChange <= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1)} kg total
+            </p>
+          )}
+        </div>
+        
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Activity className="h-4 w-4" />
+            <span className="text-sm">IMC</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {lastMeasurement?.imc ? lastMeasurement.imc.toFixed(1) : '-'}
+          </p>
+          {lastMeasurement?.imc && (
+            <p className="text-xs text-gray-500 mt-1">
+              {lastMeasurement.imc < 18.5 ? 'Bajo peso' : 
+               lastMeasurement.imc < 25 ? 'Normal' : 
+               lastMeasurement.imc < 30 ? 'Sobrepeso' : 'Obesidad'}
+            </p>
+          )}
+        </div>
+        
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Ruler className="h-4 w-4" />
+            <span className="text-sm">Cintura</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {lastMeasurement?.waist_circumference ? `${lastMeasurement.waist_circumference} cm` : '-'}
+          </p>
+        </div>
+        
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Calendar className="h-4 w-4" />
+            <span className="text-sm">Última medición</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {lastMeasurement ? format(new Date(lastMeasurement.recorded_at), 'dd MMM') : '-'}
+          </p>
+          {daysSinceLastMeasurement !== null && (
+            <p className={`text-xs mt-1 ${daysSinceLastMeasurement > 14 ? 'text-orange-600' : 'text-gray-500'}`}>
+              Hace {daysSinceLastMeasurement} días
+            </p>
+          )}
+          <button
+            onClick={() => setShowMeasurementModal(true)}
+            className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium"
+          >
+            <Plus className="h-3 w-3" />
+            Registrar
+          </button>
+        </div>
+      </div>
+
+      {/* Warning Banner */}
+      {daysSinceLastMeasurement !== null && daysSinceLastMeasurement > 14 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
+          <div>
+            <p className="font-medium text-orange-800">Paciente sin mediciones recientes</p>
+            <p className="text-sm text-orange-700">
+              Han pasado {daysSinceLastMeasurement} días desde la última medición. Considera contactar al paciente.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Weight Chart */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Evolución del peso</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTimeRange('7')}
+                className={`px-3 py-1 text-xs rounded-lg ${timeRange === '7' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}
+              >
+                7 días
+              </button>
+              <button
+                onClick={() => setTimeRange('30')}
+                className={`px-3 py-1 text-xs rounded-lg ${timeRange === '30' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}
+              >
+                30 días
+              </button>
+              <button
+                onClick={() => setTimeRange('90')}
+                className={`px-3 py-1 text-xs rounded-lg ${timeRange === '90' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}
+              >
+                90 días
+              </button>
+            </div>
+          </div>
+          
+          {filteredMeasurements.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={filteredMeasurements}>
+                <defs>
+                  <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis 
+                  dataKey="recorded_at" 
+                  tickFormatter={(date) => format(new Date(date), 'dd MMM')}
+                  tick={{ fontSize: 12 }}
+                  stroke="#9ca3af"
+                />
+                <YAxis 
+                  domain={['dataMin - 2', 'dataMax + 2']}
+                  tick={{ fontSize: 12 }}
+                  stroke="#9ca3af"
+                />
+                <Tooltip 
+                  labelFormatter={(date) => format(new Date(date), 'dd MMM yyyy')}
+                  formatter={(value) => [`${value} kg`, 'Peso']}
+                  contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb' }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="weight" 
+                  stroke="#10b981" 
+                  strokeWidth={2}
+                  fill="url(#colorWeight)" 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <Scale className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                <p>No hay mediciones en este período</p>
+                <p className="text-sm">Registra la primera medición del paciente</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Active Plan Card */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Plan nutricional</h2>
+          
+          {activePlan ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                  Activo
+                </span>
+                <span className="text-sm text-gray-500">
+                  Desde {format(new Date(activePlan.start_date), 'dd MMM')}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Calorías</p>
+                  <p className="text-lg font-bold text-gray-900">{activePlan.daily_calories}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Proteína</p>
+                  <p className="text-lg font-bold text-gray-900">{activePlan.daily_protein}g</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Carbs</p>
+                  <p className="text-lg font-bold text-gray-900">{activePlan.daily_carbs}g</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Grasas</p>
+                  <p className="text-lg font-bold text-gray-900">{activePlan.daily_fat}g</p>
+                </div>
+              </div>
+              
+              <div className="flex gap-2 mt-2">
+                <Link 
+                  to={`/patients/${patientId}/meals`}
+                  className="flex-1 text-center text-sm text-emerald-600 hover:text-emerald-700 py-2 px-3 bg-emerald-50 rounded-lg"
+                >
+                  Seguimiento de comidas →
+                </Link>
+                <Link 
+                  to={`/plans/${patientId}`}
+                  className="flex-1 text-center text-sm text-blue-600 hover:text-blue-700 py-2 px-3 bg-blue-50 rounded-lg"
+                >
+                  Editar plan
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <Utensils className="h-10 w-10 mx-auto text-gray-300 mb-2" />
+              <p className="text-gray-500 text-sm mb-3">Sin plan nutricional</p>
+              <Link
+                to={`/plans/${patientId}`}
+                className="inline-flex items-center gap-2 text-sm text-emerald-600 hover:text-emerald-700"
+              >
+                Crear plan
+              </Link>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Next Appointments */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Próximas citas</h2>
+          <Link to="/" className="text-sm text-emerald-600 hover:text-emerald-700">
+            Ver todas →
+          </Link>
+        </div>
+        
+        {patientAppointments.length > 0 ? (
+          <div className="space-y-3">
+            {patientAppointments.map((appointment) => (
+              <div 
+                key={appointment.id}
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <Calendar className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {appointment.appointment_type === 'first_visit' ? 'Primera visita' :
+                       appointment.appointment_type === 'follow_up' ? 'Seguimiento' :
+                       appointment.appointment_type === 'evaluation' ? 'Evaluación' : 'Emergencia'}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {format(new Date(appointment.scheduled_at), "EEEE d 'de' MMMM 'a las' HH:mm", { locale: es })}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="h-5 w-5 text-gray-400" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-gray-500">
+            <Calendar className="h-10 w-10 mx-auto text-gray-300 mb-2" />
+            <p>No hay citas programadas</p>
+            <Link to="/" className="text-sm text-emerald-600 hover:text-emerald-700 mt-2 inline-block">
+              Agendar cita
+            </Link>
+          </div>
+        )}
+      </div>
+
+      {/* Measurements Table */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Historial de mediciones</h2>
+        
+        {measurements.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 text-xs font-medium text-gray-500 uppercase">Fecha</th>
+                  <th className="text-left py-3 text-xs font-medium text-gray-500 uppercase">Peso</th>
+                  <th className="text-left py-3 text-xs font-medium text-gray-500 uppercase">IMC</th>
+                  <th className="text-left py-3 text-xs font-medium text-gray-500 uppercase">Cintura</th>
+                  <th className="text-left py-3 text-xs font-medium text-gray-500 uppercase">% Grasa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {[...measurements].reverse().slice(0, 10).map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="py-3 text-sm text-gray-900">
+                      {format(new Date(m.recorded_at), 'dd MMM yyyy')}
+                    </td>
+                    <td className="py-3 text-sm text-gray-900">{m.weight} kg</td>
+                    <td className="py-3 text-sm text-gray-900">{m.imc?.toFixed(1) || '-'}</td>
+                    <td className="py-3 text-sm text-gray-900">{m.waist_circumference ? `${m.waist_circumference} cm` : '-'}</td>
+                    <td className="py-3 text-sm text-gray-900">{m.body_fat_percentage ? `${m.body_fat_percentage}%` : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <Scale className="h-10 w-10 mx-auto text-gray-300 mb-2" />
+            <p>No hay mediciones registradas</p>
+            <button
+              onClick={() => setShowMeasurementModal(true)}
+              className="mt-3 inline-flex items-center gap-2 text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+            >
+              <Plus className="h-4 w-4" />
+              Registrar primera medición
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Measurement Modal */}
+      {showMeasurementModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Nueva Medición</h2>
+              <button onClick={() => { setShowMeasurementModal(false); setMeasurementError(null) }} className="rounded-lg p-2 hover:bg-gray-100">
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {measurementError && (
+              <div className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                {measurementError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Peso (kg) *</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={formData.weight}
+                  onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="70.5"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Altura (cm)</label>
+                <input
+                  type="number"
+                  value={formData.height}
+                  onChange={(e) => setFormData({...formData, height: e.target.value})}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="170"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Cintura (cm)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.waist_circumference}
+                    onChange={(e) => setFormData({...formData, waist_circumference: e.target.value})}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    placeholder="80"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Cadera (cm)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.hip_circumference}
+                    onChange={(e) => setFormData({...formData, hip_circumference: e.target.value})}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    placeholder="95"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">% Grasa corporal</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.body_fat_percentage}
+                    onChange={(e) => setFormData({...formData, body_fat_percentage: e.target.value})}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    placeholder="25"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Masa muscular (kg)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formData.muscle_mass}
+                    onChange={(e) => setFormData({...formData, muscle_mass: e.target.value})}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    placeholder="35"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  rows={2}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Observaciones..."
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 pt-4 mt-4 border-t">
+              <button
+                type="button"
+                onClick={() => setShowMeasurementModal(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveMeasurement}
+                disabled={isSaving || !formData.weight}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Guardando...
+                  </>
+                ) : (
+                  'Guardar'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
