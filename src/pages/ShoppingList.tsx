@@ -1,21 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { 
-  ArrowLeft, 
-  ShoppingCart, 
-  Package, 
-  CheckCircle2, 
-  Circle, 
-  Download,
+import {
+  ArrowLeft,
+  ShoppingCart,
+  Package,
+  CheckCircle2,
+  Circle,
+  RefreshCw,
   Loader2,
   ChevronDown,
   ChevronUp
 } from 'lucide-react'
 import { usePatient, useActiveNutritionPlan, useMeals, useShoppingList } from '../hooks/useApi'
-import { format } from 'date-fns'
-import { es } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
-import type { Meal, ShoppingItem as ShoppingItemType } from '../types'
+import type { Meal } from '../types'
 
 interface AggregatedItem {
   name: string
@@ -61,68 +59,86 @@ export function ShoppingListPage() {
   const { data: shoppingList, refetch } = useShoppingList(patientId || '')
 
   useEffect(() => {
-    if (patientId) {
-      setLoading(false)
-    }
+    if (patientId) setLoading(false)
   }, [patientId])
+
+  const regenerateShoppingList = async () => {
+    if (!activePlan || !patientId) return
+    if (!window.confirm('Esto reemplazará la lista de compras actual. ¿Continuar?')) return
+    setGenerating(true)
+    try {
+      // Eliminar lista anterior
+      if (shoppingList) {
+        await supabase.from('shopping_item').delete().eq('shopping_list_id', shoppingList.id)
+        await supabase.from('shopping_list').delete().eq('id', shoppingList.id)
+      }
+      await generateShoppingListCore()
+    } catch (err) {
+      console.error('Error regenerando lista:', err)
+      alert('Error al regenerar la lista de compras')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const generateShoppingListCore = async () => {
+    const { data: mealFoods, error } = await supabase
+      .from('meal_food')
+      .select('*')
+      .in('meal_id', meals.map((m: Meal) => m.id))
+
+    if (error) throw error
+
+    const aggregated: Record<string, { name: string; totalQuantity: number; unit: string; category: string }> = {}
+
+    mealFoods?.forEach(food => {
+      const key = `${food.food_name}-${food.unit}`
+      if (aggregated[key]) {
+        aggregated[key].totalQuantity += food.quantity
+      } else {
+        aggregated[key] = {
+          name: food.food_name,
+          totalQuantity: food.quantity,
+          unit: food.unit,
+          category: food.category || 'other'
+        }
+      }
+    })
+
+    const { data: list, error: listError } = await supabase
+      .from('shopping_list')
+      .insert({
+        patient_id: patientId,
+        week_start_date: new Date().toISOString().split('T')[0],
+        name: `Lista de compras - ${activePlan!.name}`,
+        status: 'draft'
+      })
+      .select()
+      .single()
+
+    if (listError) throw listError
+
+    const shoppingItems = Object.values(aggregated).map(item => ({
+      shopping_list_id: list.id,
+      food_name: item.name,
+      quantity: item.totalQuantity,
+      unit: item.unit,
+      category: item.category,
+      is_purchased: false
+    }))
+
+    const { error: itemsError } = await supabase.from('shopping_item').insert(shoppingItems)
+    if (itemsError) throw itemsError
+
+    await refetch()
+  }
 
   const generateShoppingList = async () => {
     if (!activePlan || !patientId) return
-    
+
     setGenerating(true)
     try {
-      const { data: mealFoods, error } = await supabase
-        .from('meal_food')
-        .select('*')
-        .in('meal_id', meals.map((m: Meal) => m.id))
-      
-      if (error) throw error
-
-      const aggregated: Record<string, AggregatedItem> = {}
-      
-      mealFoods?.forEach(food => {
-        const key = `${food.food_name}-${food.unit}`
-        if (aggregated[key]) {
-          aggregated[key].totalQuantity += food.quantity
-        } else {
-          aggregated[key] = {
-            name: food.food_name,
-            totalQuantity: food.quantity,
-            unit: food.unit,
-            category: food.category || 'other'
-          }
-        }
-      })
-
-      const { data: list, error: listError } = await supabase
-        .from('shopping_list')
-        .insert({
-          patient_id: patientId,
-          week_start_date: new Date().toISOString().split('T')[0],
-          name: `Lista de compras - ${activePlan.name}`,
-          status: 'draft'
-        })
-        .select()
-        .single()
-      
-      if (listError) throw listError
-
-      const shoppingItems = Object.values(aggregated).map(item => ({
-        shopping_list_id: list.id,
-        food_name: item.name,
-        quantity: item.totalQuantity,
-        unit: item.unit,
-        category: item.category,
-        is_purchased: false
-      }))
-
-      const { error: itemsError } = await supabase
-        .from('shopping_item')
-        .insert(shoppingItems)
-      
-      if (itemsError) throw itemsError
-
-      await refetch()
+      await generateShoppingListCore()
     } catch (err) {
       console.error('Error generating shopping list:', err)
       alert('Error al generar la lista de compras')
@@ -193,24 +209,26 @@ export function ShoppingListPage() {
           <p className="text-gray-500">{patient?.name} {patient?.last_name}</p>
         </div>
         
-        {!shoppingList && activePlan && (
-          <button
-            onClick={generateShoppingList}
-            disabled={generating}
-            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generando...
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="h-4 w-4" />
-                Generar Lista
-              </>
-            )}
-          </button>
+        {activePlan && (
+          shoppingList ? (
+            <button
+              onClick={regenerateShoppingList}
+              disabled={generating}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Regenerar
+            </button>
+          ) : (
+            <button
+              onClick={generateShoppingList}
+              disabled={generating}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+              {generating ? 'Generando...' : 'Generar Lista'}
+            </button>
+          )
         )}
       </div>
 
@@ -280,14 +298,14 @@ export function ShoppingListPage() {
                       ({group.items.length} items)
                     </span>
                   </div>
-                  {expandedCategories[group.category] ? (
-                    <ChevronUp className="h-5 w-5 text-gray-400" />
-                  ) : (
+                  {expandedCategories[group.category] === false ? (
                     <ChevronDown className="h-5 w-5 text-gray-400" />
+                  ) : (
+                    <ChevronUp className="h-5 w-5 text-gray-400" />
                   )}
                 </button>
-                
-                {expandedCategories[group.category] && (
+
+                {expandedCategories[group.category] !== false && (
                   <div className="border-t border-gray-100 p-4 space-y-2">
                     {group.items.map((item, idx) => {
                       const originalItem = shoppingList.items?.find(

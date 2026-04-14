@@ -542,6 +542,8 @@ export const useUpdateMeal = () => {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan', data.plan_id] })
+      queryClient.invalidateQueries({ queryKey: ['mealsWithFoods', data.plan_id] })
+      queryClient.invalidateQueries({ queryKey: ['meals', data.plan_id] })
     },
   })
 }
@@ -559,6 +561,8 @@ export const useDeleteMeal = () => {
     },
     onSuccess: (planId) => {
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan', planId] })
+      queryClient.invalidateQueries({ queryKey: ['mealsWithFoods', planId] })
+      queryClient.invalidateQueries({ queryKey: ['meals', planId] })
     },
   })
 }
@@ -577,6 +581,7 @@ export const useCreateMealFood = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan'] })
+      queryClient.invalidateQueries({ queryKey: ['mealsWithFoods'] })
     },
   })
 }
@@ -596,6 +601,7 @@ export const useUpdateMealFood = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan'] })
+      queryClient.invalidateQueries({ queryKey: ['mealsWithFoods'] })
     },
   })
 }
@@ -612,6 +618,7 @@ export const useDeleteMealFood = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan'] })
+      queryClient.invalidateQueries({ queryKey: ['mealsWithFoods'] })
     },
   })
 }
