@@ -800,3 +800,156 @@ export const useAdherenceRate = (patientId: string, days: number = 7) => {
     enabled: !!patientId,
   })
 }
+
+// ============ FICHA MÉDICA — ANTECEDENTES ============
+
+export interface MedicalHistory {
+  id: string
+  patient_id: string
+  condition: string
+  diagnosed_date?: string
+  current: boolean
+  notes?: string
+  created_at: string
+}
+
+export const usePatientMedicalHistory = (patientId: string) => {
+  return useQuery({
+    queryKey: ['medicalHistory', patientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('patient_medical_history')
+        .select('*')
+        .eq('patient_id', patientId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data as MedicalHistory[]
+    },
+    enabled: !!patientId,
+  })
+}
+
+export const useCreateMedicalHistory = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (record: Partial<MedicalHistory>) => {
+      const { data, error } = await supabase
+        .from('patient_medical_history')
+        .insert(record)
+        .select()
+        .single()
+      if (error) throw error
+      return data as MedicalHistory
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['medicalHistory', variables.patient_id] })
+    },
+  })
+}
+
+export const useDeleteMedicalHistory = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, patientId }: { id: string; patientId: string }) => {
+      const { error } = await supabase
+        .from('patient_medical_history')
+        .delete()
+        .eq('id', id)
+      if (error) throw error
+      return patientId
+    },
+    onSuccess: (patientId) => {
+      queryClient.invalidateQueries({ queryKey: ['medicalHistory', patientId] })
+    },
+  })
+}
+
+// ============ FICHA MÉDICA — DOCUMENTOS ============
+
+export interface PatientDocument {
+  id: string
+  patient_id: string
+  file_name: string
+  file_path: string
+  file_type?: string
+  file_size?: number
+  notes?: string
+  uploaded_at: string
+}
+
+export const usePatientDocuments = (patientId: string) => {
+  return useQuery({
+    queryKey: ['patientDocuments', patientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('patient_document')
+        .select('*')
+        .eq('patient_id', patientId)
+        .order('uploaded_at', { ascending: false })
+      if (error) throw error
+      return data as PatientDocument[]
+    },
+    enabled: !!patientId,
+  })
+}
+
+export const useUploadDocument = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ patientId, file, notes }: { patientId: string; file: File; notes?: string }) => {
+      const filePath = `${patientId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('patient-files')
+        .upload(filePath, file)
+      if (uploadError) throw uploadError
+
+      const { data, error: dbError } = await supabase
+        .from('patient_document')
+        .insert({
+          patient_id: patientId,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+          notes: notes || null,
+        })
+        .select()
+        .single()
+      if (dbError) throw dbError
+      return data as PatientDocument
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['patientDocuments', data.patient_id] })
+    },
+  })
+}
+
+export const useDeleteDocument = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, filePath, patientId }: { id: string; filePath: string; patientId: string }) => {
+      await supabase.storage.from('patient-files').remove([filePath])
+      const { error } = await supabase.from('patient_document').delete().eq('id', id)
+      if (error) throw error
+      return patientId
+    },
+    onSuccess: (patientId) => {
+      queryClient.invalidateQueries({ queryKey: ['patientDocuments', patientId] })
+    },
+  })
+}
+
+export const useDocumentUrl = (filePath: string) => {
+  if (!filePath) return null
+  const { data } = supabase.storage.from('patient-files').getPublicUrl(filePath)
+  return data?.publicUrl || null
+}
+
+export const getDocumentSignedUrl = async (filePath: string): Promise<string | null> => {
+  const { data, error } = await supabase.storage
+    .from('patient-files')
+    .createSignedUrl(filePath, 3600)
+  if (error) return null
+  return data.signedUrl
+}

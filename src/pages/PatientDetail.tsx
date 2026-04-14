@@ -14,7 +14,15 @@ import {
   Plus,
   X,
   Loader2,
-  Pencil
+  Pencil,
+  FileText,
+  Upload,
+  Trash2,
+  Download,
+  HeartPulse,
+  ShieldAlert,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 import { 
   LineChart, 
@@ -29,8 +37,13 @@ import {
 } from 'recharts'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { usePatient, useMeasurements, useActiveNutritionPlan, useAppointments, useCreateMeasurement } from '../hooks/useApi'
-import type { PatientObjective } from '../types'
+import {
+  usePatient, useMeasurements, useActiveNutritionPlan, useAppointments, useCreateMeasurement,
+  usePatientMedicalHistory, useCreateMedicalHistory, useDeleteMedicalHistory,
+  usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl,
+  usePatientPreferences, useCreatePatientPreference, useDeletePatientPreference
+} from '../hooks/useApi'
+import type { PatientObjective, PreferenceType } from '../types'
 
 const getObjectiveLabel = (obj: PatientObjective): string => {
   const labels: Record<PatientObjective, string> = {
@@ -65,11 +78,32 @@ export function PatientDetailPage() {
     notes: ''
   })
   
+  // Ficha médica state
+  const [fichaOpen, setFichaOpen] = useState(false)
+  const [newCondition, setNewCondition] = useState({ condition: '', notes: '', diagnosed_date: '' })
+  const [addingCondition, setAddingCondition] = useState(false)
+  const [newPreference, setNewPreference] = useState({ preference_type: 'allergy' as PreferenceType, value: '' })
+  const [addingPreference, setAddingPreference] = useState(false)
+  const [uploadNotes, setUploadNotes] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
   const { data: patient, isLoading: loadingPatient } = usePatient(patientId || '')
   const { data: measurements = [] } = useMeasurements(patientId || '')
   const { data: activePlan } = useActiveNutritionPlan(patientId || '')
   const { data: appointments = [] } = useAppointments()
   const createMeasurement = useCreateMeasurement()
+
+  // Ficha médica hooks
+  const { data: medicalHistory = [] } = usePatientMedicalHistory(patientId || '')
+  const { data: documents = [] } = usePatientDocuments(patientId || '')
+  const { data: preferences = [] } = usePatientPreferences(patientId || '')
+  const createMedicalHistory = useCreateMedicalHistory()
+  const deleteMedicalHistory = useDeleteMedicalHistory()
+  const uploadDocument = useUploadDocument()
+  const deleteDocument = useDeleteDocument()
+  const createPreference = useCreatePatientPreference()
+  const deletePreference = useDeletePatientPreference()
   
   const patientAppointments = appointments
     .filter(a => a.patient_id === patientId)
@@ -126,6 +160,61 @@ export function PatientDetailPage() {
       return date >= new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
     })
     .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime())
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !patientId) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      await uploadDocument.mutateAsync({ patientId, file, notes: uploadNotes || undefined })
+      setUploadNotes('')
+      e.target.value = ''
+    } catch (err: any) {
+      setUploadError(err.message || 'Error al subir el archivo')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDeleteDocument = async (id: string, filePath: string) => {
+    if (!patientId || !window.confirm('¿Eliminar este documento?')) return
+    await deleteDocument.mutateAsync({ id, filePath, patientId })
+  }
+
+  const handleDownload = async (filePath: string, fileName: string) => {
+    const url = await getDocumentSignedUrl(filePath)
+    if (!url) return alert('No se pudo obtener el enlace de descarga')
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    a.target = '_blank'
+    a.click()
+  }
+
+  const handleAddCondition = async () => {
+    if (!newCondition.condition.trim() || !patientId) return
+    await createMedicalHistory.mutateAsync({
+      patient_id: patientId,
+      condition: newCondition.condition.trim(),
+      notes: newCondition.notes || undefined,
+      diagnosed_date: newCondition.diagnosed_date || undefined,
+      current: true,
+    })
+    setNewCondition({ condition: '', notes: '', diagnosed_date: '' })
+    setAddingCondition(false)
+  }
+
+  const handleAddPreference = async () => {
+    if (!newPreference.value.trim() || !patientId) return
+    await createPreference.mutateAsync({
+      patient_id: patientId,
+      preference_type: newPreference.preference_type,
+      value: newPreference.value.trim(),
+    })
+    setNewPreference({ preference_type: 'allergy', value: '' })
+    setAddingPreference(false)
+  }
 
   if (loadingPatient) {
     return (
@@ -498,6 +587,273 @@ export function PatientDetailPage() {
               <Plus className="h-4 w-4" />
               Registrar primera medición
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── FICHA MÉDICA ────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {/* Header colapsable */}
+        <button
+          onClick={() => setFichaOpen(o => !o)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-rose-100 flex items-center justify-center">
+              <FileText className="h-5 w-5 text-rose-600" />
+            </div>
+            <div className="text-left">
+              <h2 className="text-lg font-semibold text-gray-900">Ficha Médica</h2>
+              <p className="text-sm text-gray-500">
+                {documents.length} documento{documents.length !== 1 ? 's' : ''} •{' '}
+                {medicalHistory.length} antecedente{medicalHistory.length !== 1 ? 's' : ''} •{' '}
+                {preferences.filter(p => p.preference_type === 'allergy').length} alergia{preferences.filter(p => p.preference_type === 'allergy').length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          {fichaOpen ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+        </button>
+
+        {fichaOpen && (
+          <div className="border-t border-gray-100 divide-y divide-gray-100">
+
+            {/* ── Documentos ── */}
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Upload className="h-4 w-4 text-gray-500" />
+                  <h3 className="font-medium text-gray-900">Documentos</h3>
+                </div>
+                <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  {uploading ? 'Subiendo...' : 'Subir archivo'}
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    disabled={uploading}
+                  />
+                </label>
+              </div>
+
+              {uploadError && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  {uploadError}
+                </div>
+              )}
+
+              <div className="mb-2">
+                <input
+                  type="text"
+                  value={uploadNotes}
+                  onChange={e => setUploadNotes(e.target.value)}
+                  placeholder="Nota sobre el documento (opcional)"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {documents.length === 0 ? (
+                <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">
+                  <FileText className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+                  <p className="text-sm text-gray-500">No hay documentos subidos</p>
+                  <p className="text-xs text-gray-400 mt-1">PDF o imagen — máx. 10MB</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {documents.map(doc => (
+                    <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-8 w-8 rounded bg-rose-100 flex items-center justify-center flex-shrink-0">
+                          <FileText className="h-4 w-4 text-rose-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
+                            {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
+                            {doc.notes ? ` · ${doc.notes}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleDownload(doc.file_path, doc.file_name)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                          title="Descargar"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* ── Antecedentes médicos ── */}
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <HeartPulse className="h-4 w-4 text-gray-500" />
+                  <h3 className="font-medium text-gray-900">Antecedentes médicos</h3>
+                </div>
+                <button
+                  onClick={() => setAddingCondition(v => !v)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Agregar
+                </button>
+              </div>
+
+              {addingCondition && (
+                <div className="space-y-2 p-3 bg-gray-50 rounded-lg">
+                  <input
+                    type="text"
+                    value={newCondition.condition}
+                    onChange={e => setNewCondition(c => ({ ...c, condition: e.target.value }))}
+                    placeholder="Condición o diagnóstico *"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={newCondition.diagnosed_date}
+                      onChange={e => setNewCondition(c => ({ ...c, diagnosed_date: e.target.value }))}
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={newCondition.notes}
+                      onChange={e => setNewCondition(c => ({ ...c, notes: e.target.value }))}
+                      placeholder="Notas adicionales"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setAddingCondition(false)} className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancelar</button>
+                    <button onClick={handleAddCondition} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Guardar</button>
+                  </div>
+                </div>
+              )}
+
+              {medicalHistory.length === 0 && !addingCondition ? (
+                <p className="text-sm text-gray-400 py-2">Sin antecedentes registrados</p>
+              ) : (
+                <ul className="space-y-2">
+                  {medicalHistory.map(item => (
+                    <li key={item.id} className="flex items-start justify-between p-3 bg-gray-50 rounded-lg group">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{item.condition}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {item.diagnosed_date ? `Diagnosticado: ${new Date(item.diagnosed_date).toLocaleDateString('es-CL')}` : ''}
+                          {item.notes ? (item.diagnosed_date ? ' · ' : '') + item.notes : ''}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => deleteMedicalHistory.mutate({ id: item.id, patientId: patientId! })}
+                        className="p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* ── Alergias y restricciones ── */}
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-gray-500" />
+                  <h3 className="font-medium text-gray-900">Alergias y restricciones</h3>
+                </div>
+                <button
+                  onClick={() => setAddingPreference(v => !v)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Agregar
+                </button>
+              </div>
+
+              {addingPreference && (
+                <div className="space-y-2 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex gap-2">
+                    <select
+                      value={newPreference.preference_type}
+                      onChange={e => setNewPreference(p => ({ ...p, preference_type: e.target.value as PreferenceType }))}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="allergy">Alergia</option>
+                      <option value="diet_restriction">Restricción dietética</option>
+                      <option value="rejected_food">Alimento rechazado</option>
+                      <option value="favorite_food">Alimento favorito</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={newPreference.value}
+                      onChange={e => setNewPreference(p => ({ ...p, value: e.target.value }))}
+                      placeholder="Ej: Gluten, Lactosa, Mariscos..."
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setAddingPreference(false)} className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancelar</button>
+                    <button onClick={handleAddPreference} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Guardar</button>
+                  </div>
+                </div>
+              )}
+
+              {preferences.length === 0 && !addingPreference ? (
+                <p className="text-sm text-gray-400 py-2">Sin alergias ni restricciones registradas</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {preferences.map(pref => {
+                    const colors: Record<string, string> = {
+                      allergy: 'bg-red-100 text-red-700 border-red-200',
+                      diet_restriction: 'bg-orange-100 text-orange-700 border-orange-200',
+                      rejected_food: 'bg-gray-100 text-gray-700 border-gray-200',
+                      favorite_food: 'bg-green-100 text-green-700 border-green-200',
+                    }
+                    const labels: Record<string, string> = {
+                      allergy: 'Alergia',
+                      diet_restriction: 'Restricción',
+                      rejected_food: 'No consume',
+                      favorite_food: 'Favorito',
+                    }
+                    return (
+                      <span
+                        key={pref.id}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${colors[pref.preference_type] || colors.allergy}`}
+                      >
+                        <span className="opacity-60 text-[10px] uppercase tracking-wide">{labels[pref.preference_type]}</span>
+                        {pref.value}
+                        <button
+                          onClick={() => deletePreference.mutate(pref.id)}
+                          className="ml-1 opacity-50 hover:opacity-100"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
       </div>
