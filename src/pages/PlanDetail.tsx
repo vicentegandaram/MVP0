@@ -119,9 +119,12 @@ export function PlanDetailPage() {
       const mealTypes  = ['breakfast', 'mid_morning', 'lunch', 'afternoon', 'dinner'] as const
 
       // ── 2. Batch-insert all 35 meals (1 DB call) ───────────────────────
+      // Rotate between the two templates per meal type to give weekly variety
       const allMeals = [1, 2, 3, 4, 5, 6, 7].flatMap(day =>
         mealTypes.map(mealType => {
-          const t = templates.find(t => t.meal_type === mealType)
+          const opts = templates.filter(t => t.meal_type === mealType)
+          // Even days get template[1] if it exists, odd days get template[0]
+          const t = opts[(day % 2 === 0 && opts.length > 1) ? 1 : 0]
           return {
             plan_id:     plan.id,
             day_of_week: day,

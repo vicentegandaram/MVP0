@@ -322,7 +322,7 @@ export const mealTemplatesByObjective: Record<MealObjective, MealTemplate[]> = {
       ]
     },
     {
-      name: 'Smoothie de frutas con蛋白质',
+      name: 'Smoothie proteico de frutas',
       meal_type: 'breakfast',
       calories: 380,
       protein: 20,
