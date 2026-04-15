@@ -391,7 +391,7 @@ export const useNutritionPlanDetail = (planId: string) => {
         .select('*')
         .eq('plan_id', planId)
         .order('day_of_week')
-        .order('meal_order')
+        .order('meal_type')
       if (mealsError) throw mealsError
       
       const mealIds = meals.map(m => m.id)
@@ -940,10 +940,10 @@ export const useDeleteDocument = () => {
   })
 }
 
-export const useDocumentUrl = (filePath: string) => {
+// NOTE: bucket is private — always use getDocumentSignedUrl instead of getPublicUrl
+export const useDocumentUrl = async (filePath: string): Promise<string | null> => {
   if (!filePath) return null
-  const { data } = supabase.storage.from('patient-files').getPublicUrl(filePath)
-  return data?.publicUrl || null
+  return getDocumentSignedUrl(filePath)
 }
 
 export const getDocumentSignedUrl = async (filePath: string): Promise<string | null> => {

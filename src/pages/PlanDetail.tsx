@@ -146,8 +146,18 @@ export function PlanDetailPage() {
       if (mealsError) throw mealsError
 
       // ── 3. Batch-insert all foods (1 DB call) ──────────────────────────
+      // Build a map of meal.id → template so foods match the rotated template used above
+      const mealTemplateMap = new Map<string, typeof allMeals[0]>()
+      createdMeals.forEach((meal, idx) => {
+        mealTemplateMap.set(meal.id, allMeals[idx])
+      })
+
       const allFoods = createdMeals.flatMap(meal => {
-        const t = templates.find(t => t.meal_type === meal.meal_type)
+        const mealRow = mealTemplateMap.get(meal.id)
+        const opts = templates.filter(t => t.meal_type === meal.meal_type)
+        // Re-derive which template was used for this meal's day
+        const usedIdx = (meal.day_of_week % 2 === 0 && opts.length > 1) ? 1 : 0
+        const t = opts[usedIdx]
         return (t?.foods ?? []).map(food => ({
           meal_id:   meal.id,
           food_name: food.name,
@@ -162,9 +172,10 @@ export function PlanDetailPage() {
         if (foodsError) throw foodsError
       }
 
-      // Invalidate cached queries
+      // Invalidate & refetch — use exact keys matching useApi.ts hooks
       await queryClient.invalidateQueries({ queryKey: ['nutritionPlans', patientId] })
-      await queryClient.invalidateQueries({ queryKey: ['activeNutritionPlan', patientId] })
+      await queryClient.invalidateQueries({ queryKey: ['nutritionPlan', 'active', patientId] })
+      await queryClient.refetchQueries({ queryKey: ['nutritionPlan', 'active', patientId] })
 
       setShowModal(false)
     } catch (err: any) {
