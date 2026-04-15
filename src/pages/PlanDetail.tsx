@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { usePatient, useNutritionPlans, useActiveNutritionPlan, useCreateNutritionPlan, useCreateMeal, useCreateMealFood } from '../hooks/useApi'
-import { ChevronLeft, Plus, Calendar, Flame, Utensils, Target, X, ShoppingCart, Sparkles, Loader2, Wand2, UtensilsCrossed } from 'lucide-react'
+import { usePatient, useNutritionPlans, useActiveNutritionPlan, useCreateNutritionPlan, useCreateMeal, useCreateMealFood, usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl } from '../hooks/useApi'
+import { ChevronLeft, Plus, Calendar, Flame, Utensils, Target, X, ShoppingCart, Sparkles, Loader2, Wand2, UtensilsCrossed, FileText, Upload, Download, Trash2, AlertCircle } from 'lucide-react'
 import { useForm, UseFormReturn } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -30,13 +30,49 @@ export function PlanDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [selectedObjective, setSelectedObjective] = useState<MealObjective>('maintain')
+  const [uploadingDoc, setUploadingDoc] = useState(false)
+  const [docNotes, setDocNotes] = useState('')
+  const [docError, setDocError] = useState<string | null>(null)
   
   const { data: patient } = usePatient(patientId || '')
   const { data: plans = [] } = useNutritionPlans(patientId || '')
   const { data: activePlan } = useActiveNutritionPlan(patientId || '')
+  const { data: planDocs = [] } = usePatientDocuments(patientId || '')
   const createPlan = useCreateNutritionPlan()
   const createMeal = useCreateMeal()
   const createMealFood = useCreateMealFood()
+  const uploadDocument = useUploadDocument()
+  const deleteDocument = useDeleteDocument()
+
+  // Solo docs marcados como [PLAN]
+  const planDocuments = planDocs.filter(d => d.notes?.startsWith('[PLAN]'))
+
+  const handlePlanDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !patientId) return
+    setUploadingDoc(true)
+    setDocError(null)
+    try {
+      await uploadDocument.mutateAsync({
+        patientId,
+        file,
+        notes: `[PLAN] ${docNotes || activePlan?.name || 'Plan nutricional'}`
+      })
+      setDocNotes('')
+      e.target.value = ''
+    } catch (err: any) {
+      setDocError(err.message || 'Error al subir el archivo')
+    } finally {
+      setUploadingDoc(false)
+    }
+  }
+
+  const handleDownload = async (filePath: string, fileName: string) => {
+    const url = await getDocumentSignedUrl(filePath)
+    if (!url) return alert('No se pudo obtener el enlace')
+    const a = document.createElement('a')
+    a.href = url; a.download = fileName; a.target = '_blank'; a.click()
+  }
 
   const formMethods = useForm<PlanForm>({
     resolver: zodResolver(planSchema),
@@ -293,6 +329,76 @@ export function PlanDetailPage() {
           </button>
         </div>
       )}
+
+      {/* Documentos del plan */}
+      <div className="rounded-xl border border-gray-200 bg-white">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-rose-500" />
+            <h2 className="text-lg font-semibold text-gray-900">Documentos del plan</h2>
+            {planDocuments.length > 0 && (
+              <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                {planDocuments.length}
+              </span>
+            )}
+          </div>
+          <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100">
+            {uploadingDoc ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {uploadingDoc ? 'Subiendo...' : 'Adjuntar archivo'}
+            <input type="file" accept=".pdf,image/*" className="hidden" onChange={handlePlanDocUpload} disabled={uploadingDoc} />
+          </label>
+        </div>
+
+        <div className="p-6 space-y-3">
+          <input
+            type="text"
+            value={docNotes}
+            onChange={e => setDocNotes(e.target.value)}
+            placeholder="Descripción del documento (opcional)"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+          />
+          {docError && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" /> {docError}
+            </div>
+          )}
+
+          {planDocuments.length === 0 ? (
+            <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">
+              <FileText className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-500">Sin documentos adjuntos</p>
+              <p className="text-xs text-gray-400 mt-1">PDF o imagen del plan físico, exámenes, etc.</p>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {planDocuments.map(doc => (
+                <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-8 w-8 rounded bg-rose-100 flex items-center justify-center flex-shrink-0">
+                      <FileText className="h-4 w-4 text-rose-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
+                      <p className="text-xs text-gray-500">
+                        {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
+                        {doc.notes ? ` · ${doc.notes.replace('[PLAN] ', '')}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => handleDownload(doc.file_path, doc.file_name)} className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50">
+                      <Download className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => deleteDocument.mutate({ id: doc.id, filePath: doc.file_path, patientId: patientId! })} className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
 
       {/* Plans History */}
       <div className="rounded-xl border border-gray-200 bg-white">

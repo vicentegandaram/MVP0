@@ -25,6 +25,7 @@ import {
   useMeasurements,
   useUpdateMeal,
   useDeleteMeal,
+  useCreateMeal,
   useCreateMealFood,
   useUpdateMealFood,
   useDeleteMealFood
@@ -95,11 +96,29 @@ interface NewFoodForm {
   category: ShoppingCategory
 }
 
+interface NewMealForm {
+  meal_type: string
+  name: string
+  calories: string
+  protein: string
+  carbs: string
+  fat: string
+}
+
 const defaultNewFood: NewFoodForm = {
   food_name: '',
   quantity: '',
   unit: 'g',
   category: 'other'
+}
+
+const defaultNewMeal: NewMealForm = {
+  meal_type: 'breakfast',
+  name: '',
+  calories: '',
+  protein: '',
+  carbs: '',
+  fat: ''
 }
 
 export function PlanViewPage() {
@@ -113,6 +132,8 @@ export function PlanViewPage() {
   const [foodQuantity, setFoodQuantity] = useState('')
   const [addingFoodToMealId, setAddingFoodToMealId] = useState<string | null>(null)
   const [newFood, setNewFood] = useState<NewFoodForm>(defaultNewFood)
+  const [addingMeal, setAddingMeal] = useState(false)
+  const [newMeal, setNewMeal] = useState<NewMealForm>(defaultNewMeal)
   const [saving, setSaving] = useState(false)
 
   const { data: patient, isLoading: loadingPatient } = usePatient(patientId || '')
@@ -120,6 +141,7 @@ export function PlanViewPage() {
   const { data: meals = [], isLoading: loadingMeals } = useMealsWithFoods(activePlan?.id || '')
   const { data: measurements = [] } = useMeasurements(patientId || '')
 
+  const createMeal = useCreateMeal()
   const updateMeal = useUpdateMeal()
   const deleteMeal = useDeleteMeal()
   const createMealFood = useCreateMealFood()
@@ -236,6 +258,27 @@ export function PlanViewPage() {
     }
   }
 
+  const saveNewMeal = async () => {
+    if (!activePlan || !newMeal.name.trim()) return
+    setSaving(true)
+    try {
+      await createMeal.mutateAsync({
+        plan_id: activePlan.id,
+        day_of_week: selectedDay,
+        meal_type: newMeal.meal_type as any,
+        name: newMeal.name.trim(),
+        calories: newMeal.calories ? Number(newMeal.calories) : undefined,
+        protein: newMeal.protein ? Number(newMeal.protein) : undefined,
+        carbs: newMeal.carbs ? Number(newMeal.carbs) : undefined,
+        fat: newMeal.fat ? Number(newMeal.fat) : undefined,
+      })
+      setNewMeal(defaultNewMeal)
+      setAddingMeal(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loadingPatient || loadingPlan || loadingMeals) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -339,13 +382,22 @@ export function PlanViewPage() {
 
       {/* Meals */}
       <div className="space-y-4">
-        {dayMeals.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <Utensils className="h-12 w-12 mx-auto text-gray-300 mb-2" />
-            <p>No hay comidas definidas para este día</p>
+        {dayMeals.length === 0 && !addingMeal && (
+          <div className="text-center py-10 bg-white rounded-xl border-2 border-dashed border-gray-200">
+            <Utensils className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-500 mb-1">No hay comidas para este día</p>
+            <p className="text-sm text-gray-400 mb-4">Agrega comidas manualmente o genera el plan automático</p>
+            <button
+              onClick={() => setAddingMeal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 print:hidden"
+            >
+              <Plus className="h-4 w-4" />
+              Agregar primera comida
+            </button>
           </div>
-        ) : (
-          dayMeals.map(meal => {
+        )}
+
+        {dayMeals.map(meal => {
             const isEditingMeal = editingMealId === meal.id
             const isAddingFood = addingFoodToMealId === meal.id
 
@@ -563,7 +615,83 @@ export function PlanViewPage() {
                 </div>
               </div>
             )
-          })
+          })}
+
+        {/* Formulario nueva comida */}
+        {addingMeal && (
+          <div className="bg-white rounded-xl border-2 border-emerald-300 p-5 space-y-4 print:hidden">
+            <h3 className="font-semibold text-gray-900">Nueva comida — {dayNames[selectedDay - 1]}</h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Tipo de comida</label>
+                <select
+                  value={newMeal.meal_type}
+                  onChange={e => setNewMeal(m => ({ ...m, meal_type: e.target.value, name: mealLabels[e.target.value] || '' }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                >
+                  {Object.entries(mealLabels).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Nombre personalizado</label>
+                <input
+                  type="text"
+                  value={newMeal.name}
+                  onChange={e => setNewMeal(m => ({ ...m, name: e.target.value }))}
+                  placeholder={mealLabels[newMeal.meal_type] || 'Nombre'}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              {(['calories', 'protein', 'carbs', 'fat'] as const).map(field => (
+                <div key={field}>
+                  <label className="text-xs text-gray-500 mb-1 block">
+                    {field === 'calories' ? 'Kcal' : field === 'protein' ? 'Proteína (g)' : field === 'carbs' ? 'Carbs (g)' : 'Grasas (g)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={newMeal[field]}
+                    onChange={e => setNewMeal(m => ({ ...m, [field]: e.target.value }))}
+                    placeholder="0"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => { setAddingMeal(false); setNewMeal(defaultNewMeal) }}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveNewMeal}
+                disabled={saving || !newMeal.name.trim()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Crear comida
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Botón agregar comida (cuando ya hay comidas) */}
+        {dayMeals.length > 0 && !addingMeal && (
+          <button
+            onClick={() => setAddingMeal(true)}
+            className="w-full py-3 text-sm text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl border-2 border-dashed border-emerald-200 transition-colors font-medium print:hidden"
+          >
+            <Plus className="h-4 w-4 inline mr-1" />
+            Nueva comida para {dayNames[selectedDay - 1]}
+          </button>
         )}
       </div>
 
