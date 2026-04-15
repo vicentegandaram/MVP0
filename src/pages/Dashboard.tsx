@@ -115,25 +115,25 @@ export function DashboardPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat, index) => (
-          <div
-            key={index}
-            className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">{stat.label}</p>
-                <p className="mt-1 text-2xl font-bold text-gray-900">{stat.value}</p>
-              </div>
-              <div className={`rounded-lg p-3 ${statsCards[index].color}`}>
-                {index === 0 && <Users className="h-5 w-5 text-white" />}
-                {index === 1 && <Calendar className="h-5 w-5 text-white" />}
-                {index === 2 && <Clock className="h-5 w-5 text-white" />}
-                {index === 3 && <TrendingUp className="h-5 w-5 text-white" />}
+        {stats.map((stat, index) => {
+          const Icon = statsCards[index].icon
+          return (
+            <div
+              key={statsCards[index].key}
+              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">{stat.label}</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900">{stat.value}</p>
+                </div>
+                <div className={`rounded-lg p-3 ${statsCards[index].color}`}>
+                  <Icon className="h-5 w-5 text-white" />
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Pacientes en Riesgo */}
@@ -244,7 +244,7 @@ export function DashboardPage() {
           <span className="font-medium">Nuevo paciente</span>
         </Link>
         <Link
-          to="/"
+          to="/appointments"
           className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 p-5 text-gray-600 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
         >
           <Calendar className="h-5 w-5" />

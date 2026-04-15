@@ -92,7 +92,8 @@ export function PatientsPage() {
 
       {/* Table */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px]">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paciente</th>
@@ -144,7 +145,7 @@ export function PatientsPage() {
                 {/* Estado */}
                 <td className="px-4 py-4">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    patient.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'
+                    patient.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-700'
                   }`}>
                     {patient.is_active ? 'Activo' : 'Inactivo'}
                   </span>
@@ -230,7 +231,7 @@ export function PatientsPage() {
                             Lista de compras
                           </Link>
                           <Link
-                            to={`/patients/${patient.id}`}
+                            to={`/patients/${patient.id}#ficha`}
                             onClick={() => setOpenDropdown(null)}
                             className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
                           >
@@ -257,9 +258,13 @@ export function PatientsPage() {
           </tbody>
         </table>
 
+        </div>
         {filteredPatients.length === 0 && (
           <div className="py-12 text-center text-gray-500">
-            {searchTerm ? 'No se encontraron pacientes' : 'No hay pacientes registrados'}
+            {searchTerm
+              ? <><p className="font-medium">Sin resultados para "{searchTerm}"</p><p className="text-sm mt-1">Intenta con otro nombre o email</p></>
+              : <><p className="font-medium">No hay pacientes registrados</p><p className="text-sm mt-1">Agrega tu primer paciente con el botón de arriba</p></>
+            }
           </div>
         )}
       </div>
