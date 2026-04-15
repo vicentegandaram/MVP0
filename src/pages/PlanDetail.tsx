@@ -1,51 +1,47 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { usePatient, useNutritionPlans, useActiveNutritionPlan, useCreateNutritionPlan, useCreateMeal, useCreateMealFood, usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl } from '../hooks/useApi'
+import { useQueryClient } from '@tanstack/react-query'
+import { usePatient, useNutritionPlans, useActiveNutritionPlan, usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl } from '../hooks/useApi'
 import { ChevronLeft, Plus, Calendar, Flame, Utensils, Target, X, ShoppingCart, Sparkles, Loader2, Wand2, UtensilsCrossed, FileText, Upload, Download, Trash2, AlertCircle } from 'lucide-react'
-import { useForm, UseFormReturn } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { getTemplatesForObjective, templateToMealData, templateFoodToMealFoodData, MealObjective } from '../data/mealTemplates'
+import { getTemplatesForObjective, MealObjective } from '../data/mealTemplates'
 import { supabase } from '../lib/supabase'
-
-const planSchema = z.object({
-  name: z.string().min(1, 'Nombre del plan es requerido'),
-  start_date: z.string().min(1, 'Fecha de inicio requerida'),
-  end_date: z.string().optional(),
-  daily_calories: z.number().min(0),
-  daily_protein: z.number().min(0),
-  daily_carbs: z.number().min(0),
-  daily_fat: z.number().min(0),
-  observations: z.string().optional(),
-})
-
-type PlanForm = z.infer<typeof planSchema>
 
 export function PlanDetailPage() {
   const { patientId } = useParams<{ patientId: string }>()
+  const queryClient = useQueryClient()
+
+  // Modal state — single unified modal for all plan creation
   const [showModal, setShowModal] = useState(false)
-  const [showGenerateModal, setShowGenerateModal] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [generatingPlan, setGeneratingPlan] = useState(false)
   const [selectedObjective, setSelectedObjective] = useState<MealObjective>('maintain')
+  const [customName, setCustomName] = useState('')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Document upload state
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [docNotes, setDocNotes] = useState('')
   const [docError, setDocError] = useState<string | null>(null)
-  
+
   const { data: patient } = usePatient(patientId || '')
   const { data: plans = [] } = useNutritionPlans(patientId || '')
   const { data: activePlan } = useActiveNutritionPlan(patientId || '')
   const { data: planDocs = [] } = usePatientDocuments(patientId || '')
-  const createPlan = useCreateNutritionPlan()
-  const createMeal = useCreateMeal()
-  const createMealFood = useCreateMealFood()
   const uploadDocument = useUploadDocument()
   const deleteDocument = useDeleteDocument()
 
-  // Solo docs marcados como [PLAN]
+  // Only show docs tagged as [PLAN]
   const planDocuments = planDocs.filter(d => d.notes?.startsWith('[PLAN]'))
+
+  const openModal = () => {
+    setError(null)
+    setCustomName('')
+    setCustomStartDate('')
+    setSelectedObjective('maintain')
+    setShowModal(true)
+  }
 
   const handlePlanDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -74,133 +70,111 @@ export function PlanDetailPage() {
     a.href = url; a.download = fileName; a.target = '_blank'; a.click()
   }
 
-  const formMethods = useForm<PlanForm>({
-    resolver: zodResolver(planSchema),
-    defaultValues: {
-      daily_calories: 2000,
-      daily_protein: 150,
-      daily_carbs: 200,
-      daily_fat: 65,
-    }
-  })
-  const { register, handleSubmit, reset, formState: { errors } } = formMethods
-
-  const generatePlanWithMeals = async (objective: MealObjective) => {
+  const generatePlanWithMeals = async () => {
     setGeneratingPlan(true)
     setError(null)
-    
+
     try {
+      // Deactivate current active plan if any
       if (activePlan) {
         await supabase.from('nutrition_plan').update({ is_active: false }).eq('id', activePlan.id)
       }
-      
+
       const objectiveConfig: Record<MealObjective, { calories: number; protein: number; carbs: number; fat: number }> = {
-        lose_weight: { calories: 1800, protein: 140, carbs: 150, fat: 55 },
-        muscle_gain: { calories: 2600, protein: 170, carbs: 300, fat: 65 },
-        maintain: { calories: 2200, protein: 150, carbs: 250, fat: 65 },
-        medical: { calories: 2000, protein: 120, carbs: 280, fat: 60 }
+        lose_weight:  { calories: 1800, protein: 140, carbs: 150, fat: 55 },
+        muscle_gain:  { calories: 2600, protein: 170, carbs: 300, fat: 65 },
+        maintain:     { calories: 2200, protein: 150, carbs: 250, fat: 65 },
+        medical:      { calories: 2000, protein: 120, carbs: 280, fat: 60 },
       }
-      
-      const config = objectiveConfig[objective]
+
       const objectiveLabels: Record<MealObjective, string> = {
-        lose_weight: 'Pérdida de peso',
-        muscle_gain: 'Ganancia de músculo',
-        maintain: 'Mantenimiento',
-        medical: 'Seguimiento médico'
+        lose_weight:  'Pérdida de peso',
+        muscle_gain:  'Ganancia de músculo',
+        maintain:     'Mantenimiento',
+        medical:      'Seguimiento médico',
       }
-      
+
+      const config = objectiveConfig[selectedObjective]
+
+      // ── 1. Create plan (1 DB call) ──────────────────────────────────────
       const { data: plan, error: planError } = await supabase
         .from('nutrition_plan')
         .insert({
           patient_id: patientId,
-          name: `Plan de ${objectiveLabels[objective]}`,
-          start_date: new Date().toISOString().split('T')[0],
+          name: customName.trim() || `Plan de ${objectiveLabels[selectedObjective]}`,
+          start_date: customStartDate || new Date().toISOString().split('T')[0],
           daily_calories: config.calories,
-          daily_protein: config.protein,
-          daily_carbs: config.carbs,
-          daily_fat: config.fat,
+          daily_protein:  config.protein,
+          daily_carbs:    config.carbs,
+          daily_fat:      config.fat,
           is_active: true,
-          observations: `Plan generado automáticamente para objetivo: ${objectiveLabels[objective]}`
+          observations: `Plan generado automáticamente · Objetivo: ${objectiveLabels[selectedObjective]}`,
         })
         .select()
         .single()
-      
+
       if (planError) throw planError
-      
-      const templates = getTemplatesForObjective(objective)
-      
-      const mealTypes = ['breakfast', 'mid_morning', 'lunch', 'afternoon', 'dinner'] as const
-      
-      for (const dayOfWeek of [1, 2, 3, 4, 5, 6, 7]) {
-        for (const mealType of mealTypes) {
-          const template = templates.find(t => t.meal_type === mealType)
-          if (!template) continue
-          
-          const { data: meal, error: mealError } = await supabase
-            .from('meal')
-            .insert({
-              plan_id: plan.id,
-              day_of_week: dayOfWeek,
-              meal_type: mealType,
-              name: template.name,
-              calories: template.calories,
-              protein: template.protein,
-              carbs: template.carbs,
-              fat: template.fat
-            })
-            .select()
-            .single()
-          
-          if (mealError) continue
-          
-          for (const food of template.foods) {
-            await supabase
-              .from('meal_food')
-              .insert({
-                meal_id: meal.id,
-                food_name: food.name,
-                quantity: food.quantity,
-                unit: food.unit,
-                category: food.category
-              })
+
+      const templates  = getTemplatesForObjective(selectedObjective)
+      const mealTypes  = ['breakfast', 'mid_morning', 'lunch', 'afternoon', 'dinner'] as const
+
+      // ── 2. Batch-insert all 35 meals (1 DB call) ───────────────────────
+      const allMeals = [1, 2, 3, 4, 5, 6, 7].flatMap(day =>
+        mealTypes.map(mealType => {
+          const t = templates.find(t => t.meal_type === mealType)
+          return {
+            plan_id:     plan.id,
+            day_of_week: day,
+            meal_type:   mealType,
+            name:        t?.name     ?? mealType,
+            calories:    t?.calories ?? 0,
+            protein:     t?.protein  ?? 0,
+            carbs:       t?.carbs    ?? 0,
+            fat:         t?.fat      ?? 0,
           }
-        }
+        })
+      )
+
+      const { data: createdMeals, error: mealsError } = await supabase
+        .from('meal')
+        .insert(allMeals)
+        .select()
+
+      if (mealsError) throw mealsError
+
+      // ── 3. Batch-insert all foods (1 DB call) ──────────────────────────
+      const allFoods = createdMeals.flatMap(meal => {
+        const t = templates.find(t => t.meal_type === meal.meal_type)
+        return (t?.foods ?? []).map(food => ({
+          meal_id:   meal.id,
+          food_name: food.name,
+          quantity:  food.quantity,
+          unit:      food.unit,
+          category:  food.category,
+        }))
+      })
+
+      if (allFoods.length > 0) {
+        const { error: foodsError } = await supabase.from('meal_food').insert(allFoods)
+        if (foodsError) throw foodsError
       }
-      
-      setShowGenerateModal(false)
+
+      // Invalidate cached queries
+      await queryClient.invalidateQueries({ queryKey: ['nutritionPlans', patientId] })
+      await queryClient.invalidateQueries({ queryKey: ['activeNutritionPlan', patientId] })
+
       setShowModal(false)
-      reset()
-      
     } catch (err: any) {
       setError(err.message || 'Error al generar el plan')
     } finally {
       setGeneratingPlan(false)
     }
   }
-  
-  const onSubmit = async (data: PlanForm) => {
-    try {
-      if (activePlan) {
-        const { supabase } = await import('../lib/supabase')
-        await supabase.from('nutrition_plan').update({ is_active: false }).eq('id', activePlan.id)
-      }
-      await createPlan.mutateAsync({
-        ...data,
-        patient_id: patientId || '',
-        is_active: true,
-        end_date: data.end_date || undefined,
-      })
-      setShowModal(false)
-      reset()
-    } catch (error: any) {
-      setError(error.message || 'Error al crear el plan')
-    }
-  }
 
   if (!patient) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
       </div>
     )
   }
@@ -237,24 +211,13 @@ export function PlanDetailPage() {
               </p>
             </div>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openModal}
               className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
             >
               Crear nuevo plan
             </button>
           </div>
-          
-          {/* Botón de generar plan automático */}
-          <div className="mt-4 pt-4 border-t border-emerald-200">
-            <button
-              onClick={() => setShowGenerateModal(true)}
-              className="inline-flex items-center gap-2 text-sm text-emerald-700 hover:text-emerald-800 font-medium bg-emerald-100 hover:bg-emerald-200 px-4 py-2 rounded-lg transition-colors"
-            >
-              <Wand2 className="h-4 w-4" />
-              Generar plan con comidas
-            </button>
-          </div>
-          
+
           {/* Macros */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
             <div className="bg-white rounded-lg p-4">
@@ -291,13 +254,13 @@ export function PlanDetailPage() {
             </div>
           </div>
 
-            {activePlan.observations && (
+          {activePlan.observations && (
             <div className="mt-4 p-3 bg-white rounded-lg">
               <p className="text-sm text-gray-600">{activePlan.observations}</p>
             </div>
           )}
 
-          {/* Botón de lista de compras */}
+          {/* Quick nav buttons */}
           <div className="mt-4 pt-4 border-t border-emerald-200 flex gap-3">
             <Link
               to={`/plans/${patientId}/view`}
@@ -319,13 +282,13 @@ export function PlanDetailPage() {
         <div className="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center">
           <Target className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Sin plan nutricional</h3>
-          <p className="text-gray-500 mb-4">Crea un plan para este paciente</p>
+          <p className="text-gray-500 mb-4">Crea un plan con comidas para este paciente</p>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={openModal}
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
           >
-            <Plus className="h-4 w-4" />
-            Crear plan
+            <Sparkles className="h-4 w-4" />
+            Generar plan
           </button>
         </div>
       )}
@@ -411,22 +374,18 @@ export function PlanDetailPage() {
               No hay planes creados
             </div>
           ) : (
-            plans.map((plan) => (
+            plans.map(plan => (
               <div key={plan.id} className="px-6 py-4 flex items-center justify-between">
                 <div>
                   <p className="font-medium text-gray-900">{plan.name}</p>
                   <p className="text-sm text-gray-500">
-                    {format(new Date(plan.start_date), 'dd MMM yyyy', { locale: es })} - {plan.daily_calories} kcal
+                    {format(new Date(plan.start_date), 'dd MMM yyyy', { locale: es })} · {plan.daily_calories} kcal
                   </p>
                 </div>
                 {plan.is_active ? (
-                  <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    Activo
-                  </span>
+                  <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">Activo</span>
                 ) : (
-                  <span className="bg-gray-100 text-gray-600 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    Inactivo
-                  </span>
+                  <span className="bg-gray-100 text-gray-600 text-xs font-medium px-2.5 py-0.5 rounded-full">Inactivo</span>
                 )}
               </div>
             ))
@@ -434,234 +393,114 @@ export function PlanDetailPage() {
         </div>
       </div>
 
-      {/* Create Plan Modal */}
+      {/* ── Unified Plan Generation Modal ──────────────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Nuevo Plan Nutricional</h2>
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 my-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-emerald-600" />
+                Nuevo plan nutricional
+              </h2>
               <button onClick={() => setShowModal(false)} className="rounded-lg p-2 hover:bg-gray-100">
                 <X className="h-5 w-5 text-gray-500" />
               </button>
             </div>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <p className="text-sm text-gray-500 mb-5">
+              Elige el objetivo del paciente. Se generarán las 5 comidas diarias para toda la semana.
+            </p>
+
+            {/* Objective selector */}
+            <div className="space-y-3 mb-5">
+              {[
+                { key: 'lose_weight'  as MealObjective, emoji: '📉', label: 'Pérdida de peso',     sub: '1800 kcal · Alta saciedad',    color: 'red'    },
+                { key: 'muscle_gain'  as MealObjective, emoji: '💪', label: 'Ganancia de músculo',  sub: '2600 kcal · Alta proteína',    color: 'blue'   },
+                { key: 'maintain'     as MealObjective, emoji: '⚖️', label: 'Mantenimiento',        sub: '2200 kcal · Equilibrado',      color: 'green'  },
+                { key: 'medical'      as MealObjective, emoji: '🏥', label: 'Seguimiento médico',   sub: '2000 kcal · Fácil digestión',  color: 'purple' },
+              ].map(({ key, emoji, label, sub }) => (
+                <button
+                  key={key}
+                  onClick={() => setSelectedObjective(key)}
+                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                    selectedObjective === key
+                      ? 'border-emerald-500 bg-emerald-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-xl">
+                      {emoji}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{label}</p>
+                      <p className="text-xs text-gray-500">{sub}</p>
+                    </div>
+                    {selectedObjective === key && (
+                      <div className="ml-auto h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                        <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Optional customization */}
+            <div className="border-t border-gray-100 pt-4 mb-4 space-y-3">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Personalización (opcional)</p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del plan</label>
                 <input
-                  {...register('name')}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  placeholder="Ej: Plan de pérdida de peso"
+                  type="text"
+                  value={customName}
+                  onChange={e => setCustomName(e.target.value)}
+                  placeholder={`Plan de ${selectedObjective === 'lose_weight' ? 'Pérdida de peso' : selectedObjective === 'muscle_gain' ? 'Ganancia de músculo' : selectedObjective === 'maintain' ? 'Mantenimiento' : 'Seguimiento médico'}`}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
-                {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha inicio</label>
-                  <input
-                    type="date"
-                    {...register('start_date')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                  {errors.start_date && <p className="mt-1 text-xs text-red-600">{errors.start_date.message}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha fin (opcional)</label>
-                  <input
-                    type="date"
-                    {...register('end_date')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Calorías/día</label>
-                  <input
-                    type="number"
-                    {...register('daily_calories', { valueAsNumber: true })}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Proteína (g)</label>
-                  <input
-                    type="number"
-                    {...register('daily_protein', { valueAsNumber: true })}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Carbohidratos (g)</label>
-                  <input
-                    type="number"
-                    {...register('daily_carbs', { valueAsNumber: true })}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Grasas (g)</label>
-                  <input
-                    type="number"
-                    {...register('daily_fat', { valueAsNumber: true })}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
-                <textarea
-                  {...register('observations')}
-                  rows={3}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  placeholder="Notas adicionales..."
+                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de inicio</label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={e => setCustomStartDate(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
-              <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                >
-                  Crear plan
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
 
-      {/* Generate Plan Modal */}
-      {showGenerateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-emerald-600" />
-                Generar Plan Automático
-              </h2>
-              <button onClick={() => setShowGenerateModal(false)} className="rounded-lg p-2 hover:bg-gray-100">
-                <X className="h-5 w-5 text-gray-500" />
-              </button>
-            </div>
-            
-            <p className="text-sm text-gray-600 mb-4">
-              Selecciona el objetivo del paciente para generar un plan completo con todas las comidas de la semana.
-            </p>
-            
-            <div className="space-y-3 mb-6">
-              <button
-                onClick={() => setSelectedObjective('lose_weight')}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedObjective === 'lose_weight' 
-                    ? 'border-emerald-500 bg-emerald-50' 
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                    <span className="text-xl">📉</span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Pérdida de peso</p>
-                    <p className="text-xs text-gray-500">1800 kcal - Alta saciedad</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => setSelectedObjective('muscle_gain')}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedObjective === 'muscle_gain' 
-                    ? 'border-emerald-500 bg-emerald-50' 
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                    <span className="text-xl">💪</span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Ganancia de músculo</p>
-                    <p className="text-xs text-gray-500">2800 kcal - Alta proteína</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => setSelectedObjective('maintain')}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedObjective === 'maintain' 
-                    ? 'border-emerald-500 bg-emerald-50' 
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                    <span className="text-xl">⚖️</span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Mantenimiento</p>
-                    <p className="text-xs text-gray-500">2200 kcal - Equilibrado</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => setSelectedObjective('medical')}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedObjective === 'medical' 
-                    ? 'border-emerald-500 bg-emerald-50' 
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
-                    <span className="text-xl">🏥</span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Seguimiento médico</p>
-                    <p className="text-xs text-gray-500">2000 kcal - Fácil digestión</p>
-                  </div>
-                </div>
-              </button>
-            </div>
-            
             {error && (
-              <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">
-                {error}
+              <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" /> {error}
               </div>
             )}
-            
+
             <div className="flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setShowGenerateModal(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                onClick={() => setShowModal(false)}
+                disabled={generatingPlan}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
-                onClick={() => generatePlanWithMeals(selectedObjective)}
+                onClick={generatePlanWithMeals}
                 disabled={generatingPlan}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {generatingPlan ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Generando...
+                    Generando…
                   </>
                 ) : (
                   <>
                     <Wand2 className="h-4 w-4" />
-                    Generar Plan
+                    Generar plan
                   </>
                 )}
               </button>
