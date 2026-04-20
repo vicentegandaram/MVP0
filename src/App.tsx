@@ -15,6 +15,7 @@ import { PatientMealTrackerPage } from './pages/PatientMealTracker'
 import { ShoppingListPage } from './pages/ShoppingList'
 import { LoginPage } from './pages/Login'
 import { RegisterPage } from './pages/Register'
+import { LandingPage } from './pages/Landing'
 import { useEffect } from 'react'
 
 const queryClient = new QueryClient({
@@ -49,10 +50,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// Public route wrapper (redirect if logged in)
+// Public route wrapper (redirect to dashboard if already logged in)
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore()
-  
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -69,6 +70,10 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 const router = createBrowserRouter([
+  {
+    path: '/landing',
+    element: <LandingPage />,
+  },
   {
     path: '/login',
     element: <PublicRoute><LoginPage /></PublicRoute>,
