@@ -232,18 +232,19 @@ export function ShoppingListPage() {
         )}
       </div>
 
-      {!activePlan ? (
+      {/* If no plan but has a shopping list (imported from PDF), show it anyway */}
+      {!activePlan && !shoppingList ? (
         <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
           <ShoppingCart className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500 mb-4">El paciente no tiene un plan activo</p>
-          <Link 
+          <p className="text-gray-500 mb-4">El paciente no tiene un plan activo ni lista de compras</p>
+          <Link
             to={`/plans/${patientId}`}
             className="text-emerald-600 hover:text-emerald-700 font-medium"
           >
-            Crear plan nutricional →
+            Ir a plan nutricional →
           </Link>
         </div>
-      ) : !shoppingList ? (
+      ) : activePlan && !shoppingList ? (
         <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
           <ShoppingCart className="h-12 w-12 mx-auto text-gray-300 mb-4" />
           <p className="text-gray-500 mb-4">Genera una lista de compras basada en el plan nutricional</p>

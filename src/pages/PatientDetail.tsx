@@ -629,7 +629,7 @@ export function PatientDetailPage() {
                   {uploading ? 'Subiendo...' : 'Subir archivo'}
                   <input
                     type="file"
-                    accept=".pdf,image/*"
+                    accept=".pdf,.doc,.docx,image/*"
                     className="hidden"
                     onChange={handleFileUpload}
                     disabled={uploading}

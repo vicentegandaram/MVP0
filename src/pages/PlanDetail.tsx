@@ -1,18 +1,34 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { usePatient, useNutritionPlans, useActiveNutritionPlan, usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl } from '../hooks/useApi'
-import { ChevronLeft, Plus, Calendar, Flame, Utensils, Target, X, ShoppingCart, Sparkles, Loader2, Wand2, UtensilsCrossed, FileText, Upload, Download, Trash2, AlertCircle } from 'lucide-react'
+import {
+  usePatient, useNutritionPlans, useActiveNutritionPlan,
+  usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl
+} from '../hooks/useApi'
+import {
+  ChevronLeft, Plus, Flame, Utensils, Target, X, ShoppingCart, Sparkles,
+  Loader2, Wand2, UtensilsCrossed, FileText, Upload, Download, Trash2,
+  AlertCircle, Brain, CheckCircle2, Pencil
+} from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { getTemplatesForObjective, MealObjective } from '../data/mealTemplates'
 import { supabase } from '../lib/supabase'
+import type { FoodUnit, ShoppingCategory } from '../types'
+
+interface ExtractedFood {
+  food_name: string
+  quantity: number
+  unit: FoodUnit
+  category: ShoppingCategory
+}
 
 export function PlanDetailPage() {
   const { patientId } = useParams<{ patientId: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  // Modal state — single unified modal for all plan creation
+  // ── Plan generation modal state ──────────────────────────────
   const [showModal, setShowModal] = useState(false)
   const [selectedObjective, setSelectedObjective] = useState<MealObjective>('maintain')
   const [customName, setCustomName] = useState('')
@@ -20,10 +36,17 @@ export function PlanDetailPage() {
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Document upload state
+  // ── Document upload state ────────────────────────────────────
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [docNotes, setDocNotes] = useState('')
   const [docError, setDocError] = useState<string | null>(null)
+
+  // ── AI extraction state ──────────────────────────────────────
+  const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null)
+  const [extractedFoods, setExtractedFoods] = useState<ExtractedFood[]>([])
+  const [showFoodsModal, setShowFoodsModal] = useState(false)
+  const [creatingFromPdf, setCreatingFromPdf] = useState(false)
+  const [editingFood, setEditingFood] = useState<number | null>(null)
 
   const { data: patient } = usePatient(patientId || '')
   const { data: plans = [] } = useNutritionPlans(patientId || '')
@@ -32,7 +55,6 @@ export function PlanDetailPage() {
   const uploadDocument = useUploadDocument()
   const deleteDocument = useDeleteDocument()
 
-  // Only show docs tagged as [PLAN]
   const planDocuments = planDocs.filter(d => d.notes?.startsWith('[PLAN]'))
 
   const openModal = () => {
@@ -43,6 +65,7 @@ export function PlanDetailPage() {
     setShowModal(true)
   }
 
+  // ── Upload document ──────────────────────────────────────────
   const handlePlanDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !patientId) return
@@ -52,7 +75,7 @@ export function PlanDetailPage() {
       await uploadDocument.mutateAsync({
         patientId,
         file,
-        notes: `[PLAN] ${docNotes || activePlan?.name || 'Plan nutricional'}`
+        notes: `[PLAN] ${docNotes || activePlan?.name || 'Pauta nutricional'}`
       })
       setDocNotes('')
       e.target.value = ''
@@ -63,6 +86,7 @@ export function PlanDetailPage() {
     }
   }
 
+  // ── Download document ────────────────────────────────────────
   const handleDownload = async (filePath: string, fileName: string) => {
     const url = await getDocumentSignedUrl(filePath)
     if (!url) return alert('No se pudo obtener el enlace')
@@ -70,12 +94,98 @@ export function PlanDetailPage() {
     a.href = url; a.download = fileName; a.target = '_blank'; a.click()
   }
 
+  // ── AI: analyze document → extract foods ────────────────────
+  const handleAnalyzeDoc = async (filePath: string, docId: string) => {
+    setAnalyzingDocId(docId)
+    setDocError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-plan`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ filePath }),
+        }
+      )
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      if (!data.foods || data.foods.length === 0) {
+        throw new Error('No se encontraron alimentos en el documento. Verifica que sea una pauta nutricional en PDF.')
+      }
+      setExtractedFoods(data.foods)
+      setShowFoodsModal(true)
+    } catch (err: any) {
+      setDocError(err.message || 'Error al analizar el documento')
+    } finally {
+      setAnalyzingDocId(null)
+    }
+  }
+
+  // ── AI: create shopping list from extracted foods ─────────────
+  const handleCreateListFromFoods = async () => {
+    if (!patientId || extractedFoods.length === 0) return
+    setCreatingFromPdf(true)
+    setDocError(null)
+    try {
+      // Delete existing shopping list
+      const { data: existingList } = await supabase
+        .from('shopping_list')
+        .select('id')
+        .eq('patient_id', patientId)
+        .maybeSingle()
+
+      if (existingList) {
+        await supabase.from('shopping_item').delete().eq('shopping_list_id', existingList.id)
+        await supabase.from('shopping_list').delete().eq('id', existingList.id)
+      }
+
+      // Create new shopping list
+      const { data: list, error: listError } = await supabase
+        .from('shopping_list')
+        .insert({
+          patient_id: patientId,
+          week_start_date: new Date().toISOString().split('T')[0],
+          name: 'Lista generada desde pauta PDF',
+          status: 'draft',
+        })
+        .select()
+        .single()
+
+      if (listError) throw listError
+
+      // Insert items
+      const items = extractedFoods.map(food => ({
+        shopping_list_id: list.id,
+        food_name: food.food_name,
+        quantity: food.quantity,
+        unit: food.unit,
+        category: food.category,
+        is_purchased: false,
+      }))
+
+      const { error: itemsError } = await supabase.from('shopping_item').insert(items)
+      if (itemsError) throw itemsError
+
+      setShowFoodsModal(false)
+      navigate(`/plans/${patientId}/shopping`)
+    } catch (err: any) {
+      setDocError(err.message || 'Error al generar la lista')
+    } finally {
+      setCreatingFromPdf(false)
+    }
+  }
+
+  // ── Auto-generate plan ───────────────────────────────────────
   const generatePlanWithMeals = async () => {
     setGeneratingPlan(true)
     setError(null)
 
     try {
-      // Deactivate current active plan if any
       if (activePlan) {
         await supabase.from('nutrition_plan').update({ is_active: false }).eq('id', activePlan.id)
       }
@@ -96,7 +206,6 @@ export function PlanDetailPage() {
 
       const config = objectiveConfig[selectedObjective]
 
-      // ── 1. Create plan (1 DB call) ──────────────────────────────────────
       const { data: plan, error: planError } = await supabase
         .from('nutrition_plan')
         .insert({
@@ -118,12 +227,9 @@ export function PlanDetailPage() {
       const templates  = getTemplatesForObjective(selectedObjective)
       const mealTypes  = ['breakfast', 'mid_morning', 'lunch', 'afternoon', 'dinner'] as const
 
-      // ── 2. Batch-insert all 35 meals (1 DB call) ───────────────────────
-      // Rotate between the two templates per meal type to give weekly variety
       const allMeals = [1, 2, 3, 4, 5, 6, 7].flatMap(day =>
         mealTypes.map(mealType => {
           const opts = templates.filter(t => t.meal_type === mealType)
-          // Even days get template[1] if it exists, odd days get template[0]
           const t = opts[(day % 2 === 0 && opts.length > 1) ? 1 : 0]
           return {
             plan_id:     plan.id,
@@ -139,23 +245,11 @@ export function PlanDetailPage() {
       )
 
       const { data: createdMeals, error: mealsError } = await supabase
-        .from('meal')
-        .insert(allMeals)
-        .select()
-
+        .from('meal').insert(allMeals).select()
       if (mealsError) throw mealsError
 
-      // ── 3. Batch-insert all foods (1 DB call) ──────────────────────────
-      // Build a map of meal.id → template so foods match the rotated template used above
-      const mealTemplateMap = new Map<string, typeof allMeals[0]>()
-      createdMeals.forEach((meal, idx) => {
-        mealTemplateMap.set(meal.id, allMeals[idx])
-      })
-
       const allFoods = createdMeals.flatMap(meal => {
-        const mealRow = mealTemplateMap.get(meal.id)
         const opts = templates.filter(t => t.meal_type === meal.meal_type)
-        // Re-derive which template was used for this meal's day
         const usedIdx = (meal.day_of_week % 2 === 0 && opts.length > 1) ? 1 : 0
         const t = opts[usedIdx]
         return (t?.foods ?? []).map(food => ({
@@ -172,7 +266,6 @@ export function PlanDetailPage() {
         if (foodsError) throw foodsError
       }
 
-      // Invalidate & refetch — use exact keys matching useApi.ts hooks
       await queryClient.invalidateQueries({ queryKey: ['nutritionPlans', patientId] })
       await queryClient.invalidateQueries({ queryKey: ['nutritionPlan', 'active', patientId] })
       await queryClient.refetchQueries({ queryKey: ['nutritionPlan', 'active', patientId] })
@@ -191,6 +284,11 @@ export function PlanDetailPage() {
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
       </div>
     )
+  }
+
+  const categoryLabels: Record<string, string> = {
+    protein: 'Proteínas', vegetables: 'Verduras', fruits: 'Frutas',
+    dairy: 'Lácteos', grains: 'Cereales', fats: 'Grasas', other: 'Otros'
   }
 
   return (
@@ -224,48 +322,24 @@ export function PlanDetailPage() {
                 {activePlan.end_date && ` hasta ${format(new Date(activePlan.end_date), 'dd MMM yyyy', { locale: es })}`}
               </p>
             </div>
-            <button
-              onClick={openModal}
-              className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-            >
+            <button onClick={openModal} className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">
               Crear nuevo plan
             </button>
           </div>
 
-          {/* Macros */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-            <div className="bg-white rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-500 mb-1">
-                <Flame className="h-4 w-4" />
-                <span className="text-sm">Calorías</span>
+            {[
+              { icon: <Flame className="h-4 w-4" />, label: 'Calorías', value: activePlan.daily_calories, unit: 'kcal/día' },
+              { icon: <Utensils className="h-4 w-4" />, label: 'Proteína', value: `${activePlan.daily_protein}g`, unit: '/día' },
+              { icon: <Utensils className="h-4 w-4" />, label: 'Carbs', value: `${activePlan.daily_carbs}g`, unit: '/día' },
+              { icon: <Utensils className="h-4 w-4" />, label: 'Grasas', value: `${activePlan.daily_fat}g`, unit: '/día' },
+            ].map(({ icon, label, value, unit }) => (
+              <div key={label} className="bg-white rounded-lg p-4">
+                <div className="flex items-center gap-2 text-gray-500 mb-1">{icon}<span className="text-sm">{label}</span></div>
+                <p className="text-2xl font-bold text-gray-900">{value}</p>
+                <p className="text-xs text-gray-500">{unit}</p>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{activePlan.daily_calories}</p>
-              <p className="text-xs text-gray-500">kcal/día</p>
-            </div>
-            <div className="bg-white rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-500 mb-1">
-                <Utensils className="h-4 w-4" />
-                <span className="text-sm">Proteína</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{activePlan.daily_protein}g</p>
-              <p className="text-xs text-gray-500">/día</p>
-            </div>
-            <div className="bg-white rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-500 mb-1">
-                <Utensils className="h-4 w-4" />
-                <span className="text-sm">Carbs</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{activePlan.daily_carbs}g</p>
-              <p className="text-xs text-gray-500">/día</p>
-            </div>
-            <div className="bg-white rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-500 mb-1">
-                <Utensils className="h-4 w-4" />
-                <span className="text-sm">Grasas</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{activePlan.daily_fat}g</p>
-              <p className="text-xs text-gray-500">/día</p>
-            </div>
+            ))}
           </div>
 
           {activePlan.observations && (
@@ -274,18 +348,17 @@ export function PlanDetailPage() {
             </div>
           )}
 
-          {/* Quick nav buttons */}
           <div className="mt-4 pt-4 border-t border-emerald-200 flex gap-3">
             <Link
               to={`/plans/${patientId}/view`}
-              className="inline-flex items-center gap-2 text-sm text-blue-700 hover:text-blue-800 font-medium bg-blue-100 hover:bg-blue-200 px-4 py-2 rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 text-sm text-blue-700 font-medium bg-blue-100 hover:bg-blue-200 px-4 py-2 rounded-lg transition-colors"
             >
               <UtensilsCrossed className="h-4 w-4" />
               Ver plan completo
             </Link>
             <Link
               to={`/plans/${patientId}/shopping`}
-              className="inline-flex items-center gap-2 text-sm text-emerald-700 hover:text-emerald-800 font-medium bg-emerald-100 hover:bg-emerald-200 px-4 py-2 rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 text-sm text-emerald-700 font-medium bg-emerald-100 hover:bg-emerald-200 px-4 py-2 rounded-lg transition-colors"
             >
               <ShoppingCart className="h-4 w-4" />
               Lista de compras
@@ -295,34 +368,42 @@ export function PlanDetailPage() {
       ) : (
         <div className="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center">
           <Target className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Sin plan nutricional</h3>
-          <p className="text-gray-500 mb-4">Crea un plan con comidas para este paciente</p>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Sin plan nutricional automático</h3>
+          <p className="text-gray-500 mb-4">Genera un plan con comidas predefinidas, o sube una pauta en PDF y analízala con IA</p>
           <button
             onClick={openModal}
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
           >
             <Sparkles className="h-4 w-4" />
-            Generar plan
+            Generar plan automático
           </button>
         </div>
       )}
 
-      {/* Documentos del plan */}
+      {/* ── Documentos / Pauta PDF ──────────────────────────────── */}
       <div className="rounded-xl border border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-rose-500" />
-            <h2 className="text-lg font-semibold text-gray-900">Documentos del plan</h2>
+            <FileText className="h-5 w-5 text-violet-500" />
+            <h2 className="text-lg font-semibold text-gray-900">Pauta nutricional (PDF / Word)</h2>
             {planDocuments.length > 0 && (
               <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                 {planDocuments.length}
               </span>
             )}
           </div>
-          <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100">
-            {uploadingDoc ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            {uploadingDoc ? 'Subiendo...' : 'Adjuntar archivo'}
-            <input type="file" accept=".pdf,image/*" className="hidden" onChange={handlePlanDocUpload} disabled={uploadingDoc} />
+          <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100">
+            {uploadingDoc
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <Upload className="h-3.5 w-3.5" />}
+            {uploadingDoc ? 'Subiendo...' : 'Adjuntar pauta'}
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx,image/*"
+              className="hidden"
+              onChange={handlePlanDocUpload}
+              disabled={uploadingDoc}
+            />
           </label>
         </div>
 
@@ -332,8 +413,9 @@ export function PlanDetailPage() {
             value={docNotes}
             onChange={e => setDocNotes(e.target.value)}
             placeholder="Descripción del documento (opcional)"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"
           />
+
           {docError && (
             <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
               <AlertCircle className="h-4 w-4 flex-shrink-0" /> {docError}
@@ -341,52 +423,78 @@ export function PlanDetailPage() {
           )}
 
           {planDocuments.length === 0 ? (
-            <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">
-              <FileText className="h-8 w-8 mx-auto text-gray-300 mb-2" />
-              <p className="text-sm text-gray-500">Sin documentos adjuntos</p>
-              <p className="text-xs text-gray-400 mt-1">PDF o imagen del plan físico, exámenes, etc.</p>
+            <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-xl">
+              <Brain className="h-10 w-10 mx-auto text-gray-300 mb-2" />
+              <p className="text-sm font-medium text-gray-600">Sube una pauta en PDF</p>
+              <p className="text-xs text-gray-400 mt-1">
+                La IA extraerá los alimentos y generará la lista de compras automáticamente
+              </p>
             </div>
           ) : (
             <ul className="space-y-2">
-              {planDocuments.map(doc => (
-                <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-8 w-8 rounded bg-rose-100 flex items-center justify-center flex-shrink-0">
-                      <FileText className="h-4 w-4 text-rose-600" />
+              {planDocuments.map(doc => {
+                const isPdf = doc.file_name.toLowerCase().endsWith('.pdf')
+                const isAnalyzing = analyzingDocId === doc.id
+                return (
+                  <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-8 w-8 rounded bg-violet-100 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-4 w-4 text-violet-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
+                          {doc.notes ? ` · ${doc.notes.replace('[PLAN] ', '')}` : ''}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
-                      <p className="text-xs text-gray-500">
-                        {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
-                        {doc.notes ? ` · ${doc.notes.replace('[PLAN] ', '')}` : ''}
-                      </p>
+
+                    <div className="flex items-center gap-1 ml-2 shrink-0">
+                      {/* AI analysis button — only for PDF */}
+                      {isPdf && (
+                        <button
+                          onClick={() => handleAnalyzeDoc(doc.file_path, doc.id)}
+                          disabled={isAnalyzing || !!analyzingDocId}
+                          title="Analizar con IA y generar lista de compras"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-violet-700 bg-violet-100 hover:bg-violet-200 disabled:opacity-50 transition-colors"
+                        >
+                          {isAnalyzing
+                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Analizando...</>
+                            : <><Brain className="h-3.5 w-3.5" />Analizar con IA</>}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDownload(doc.file_path, doc.file_name)}
+                        className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50"
+                        title="Descargar"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => deleteDocument.mutate({ id: doc.id, filePath: doc.file_path, patientId: patientId! })}
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        title="Eliminar"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => handleDownload(doc.file_path, doc.file_name)} className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50">
-                      <Download className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => deleteDocument.mutate({ id: doc.id, filePath: doc.file_path, patientId: patientId! })} className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>
       </div>
 
-      {/* Plans History */}
+      {/* Plan History */}
       <div className="rounded-xl border border-gray-200 bg-white">
         <div className="border-b border-gray-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Historial de planes</h2>
         </div>
         <div className="divide-y divide-gray-200">
           {plans.length === 0 ? (
-            <div className="px-6 py-8 text-center text-gray-500">
-              No hay planes creados
-            </div>
+            <div className="px-6 py-8 text-center text-gray-500">No hay planes creados</div>
           ) : (
             plans.map(plan => (
               <div key={plan.id} className="px-6 py-4 flex items-center justify-between">
@@ -396,22 +504,19 @@ export function PlanDetailPage() {
                     {format(new Date(plan.start_date), 'dd MMM yyyy', { locale: es })} · {plan.daily_calories} kcal
                   </p>
                 </div>
-                {plan.is_active ? (
-                  <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">Activo</span>
-                ) : (
-                  <span className="bg-gray-100 text-gray-600 text-xs font-medium px-2.5 py-0.5 rounded-full">Inactivo</span>
-                )}
+                {plan.is_active
+                  ? <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">Activo</span>
+                  : <span className="bg-gray-100 text-gray-600 text-xs font-medium px-2.5 py-0.5 rounded-full">Inactivo</span>}
               </div>
             ))
           )}
         </div>
       </div>
 
-      {/* ── Unified Plan Generation Modal ──────────────────────────────── */}
+      {/* ── Modal: Generate plan ──────────────────────────────────── */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8 px-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 my-auto">
-            {/* Header */}
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-emerald-600" />
@@ -422,30 +527,25 @@ export function PlanDetailPage() {
               </button>
             </div>
             <p className="text-sm text-gray-500 mb-5">
-              Elige el objetivo del paciente. Se generarán las 5 comidas diarias para toda la semana.
+              Elige el objetivo. Se generarán 5 comidas diarias para toda la semana.
             </p>
 
-            {/* Objective selector */}
             <div className="space-y-3 mb-5">
               {[
-                { key: 'lose_weight'  as MealObjective, emoji: '📉', label: 'Pérdida de peso',     sub: '1800 kcal · Alta saciedad',    color: 'red'    },
-                { key: 'muscle_gain'  as MealObjective, emoji: '💪', label: 'Ganancia de músculo',  sub: '2600 kcal · Alta proteína',    color: 'blue'   },
-                { key: 'maintain'     as MealObjective, emoji: '⚖️', label: 'Mantenimiento',        sub: '2200 kcal · Equilibrado',      color: 'green'  },
-                { key: 'medical'      as MealObjective, emoji: '🏥', label: 'Seguimiento médico',   sub: '2000 kcal · Fácil digestión',  color: 'purple' },
+                { key: 'lose_weight'  as MealObjective, emoji: '📉', label: 'Pérdida de peso',    sub: '1800 kcal · Alta saciedad'   },
+                { key: 'muscle_gain'  as MealObjective, emoji: '💪', label: 'Ganancia de músculo', sub: '2600 kcal · Alta proteína'   },
+                { key: 'maintain'     as MealObjective, emoji: '⚖️', label: 'Mantenimiento',       sub: '2200 kcal · Equilibrado'     },
+                { key: 'medical'      as MealObjective, emoji: '🏥', label: 'Seguimiento médico',  sub: '2000 kcal · Fácil digestión' },
               ].map(({ key, emoji, label, sub }) => (
                 <button
                   key={key}
                   onClick={() => setSelectedObjective(key)}
                   className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                    selectedObjective === key
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                    selectedObjective === key ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-xl">
-                      {emoji}
-                    </div>
+                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-xl">{emoji}</div>
                     <div>
                       <p className="font-medium text-gray-900">{label}</p>
                       <p className="text-xs text-gray-500">{sub}</p>
@@ -462,28 +562,21 @@ export function PlanDetailPage() {
               ))}
             </div>
 
-            {/* Optional customization */}
             <div className="border-t border-gray-100 pt-4 mb-4 space-y-3">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Personalización (opcional)</p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del plan</label>
-                <input
-                  type="text"
-                  value={customName}
-                  onChange={e => setCustomName(e.target.value)}
-                  placeholder={`Plan de ${selectedObjective === 'lose_weight' ? 'Pérdida de peso' : selectedObjective === 'muscle_gain' ? 'Ganancia de músculo' : selectedObjective === 'maintain' ? 'Mantenimiento' : 'Seguimiento médico'}`}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de inicio</label>
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={e => setCustomStartDate(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
+              <input
+                type="text"
+                value={customName}
+                onChange={e => setCustomName(e.target.value)}
+                placeholder="Nombre del plan"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+              />
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+              />
             </div>
 
             {error && (
@@ -493,31 +586,146 @@ export function PlanDetailPage() {
             )}
 
             <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                disabled={generatingPlan}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-              >
+              <button onClick={() => setShowModal(false)} disabled={generatingPlan}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50">
                 Cancelar
               </button>
-              <button
-                onClick={generatePlanWithMeals}
-                disabled={generatingPlan}
-                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                {generatingPlan ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Generando…
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="h-4 w-4" />
-                    Generar plan
-                  </>
-                )}
+              <button onClick={generatePlanWithMeals} disabled={generatingPlan}
+                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2">
+                {generatingPlan
+                  ? <><Loader2 className="h-4 w-4 animate-spin" />Generando…</>
+                  : <><Wand2 className="h-4 w-4" />Generar plan</>}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: AI extracted foods review ─────────────────────── */}
+      {showFoodsModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white my-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-lg bg-violet-100 flex items-center justify-center">
+                  <Brain className="h-4 w-4 text-violet-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Alimentos extraídos</h2>
+                  <p className="text-xs text-gray-500">{extractedFoods.length} ingredientes encontrados</p>
+                </div>
+              </div>
+              <button onClick={() => setShowFoodsModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Foods list */}
+            <div className="px-6 py-4 max-h-[50vh] overflow-y-auto space-y-2">
+              {extractedFoods.map((food, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-2.5 bg-gray-50 rounded-lg">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                  {editingFood === idx ? (
+                    <div className="flex-1 grid grid-cols-3 gap-2">
+                      <input
+                        className="col-span-3 rounded border border-gray-200 px-2 py-1 text-sm"
+                        value={food.food_name}
+                        onChange={e => {
+                          const updated = [...extractedFoods]
+                          updated[idx] = { ...food, food_name: e.target.value }
+                          setExtractedFoods(updated)
+                        }}
+                      />
+                      <input
+                        type="number"
+                        className="rounded border border-gray-200 px-2 py-1 text-sm"
+                        value={food.quantity}
+                        onChange={e => {
+                          const updated = [...extractedFoods]
+                          updated[idx] = { ...food, quantity: Number(e.target.value) }
+                          setExtractedFoods(updated)
+                        }}
+                      />
+                      <select
+                        className="rounded border border-gray-200 px-2 py-1 text-sm"
+                        value={food.unit}
+                        onChange={e => {
+                          const updated = [...extractedFoods]
+                          updated[idx] = { ...food, unit: e.target.value as FoodUnit }
+                          setExtractedFoods(updated)
+                        }}
+                      >
+                        {['g', 'ml', 'piece', 'cup', 'tbsp'].map(u => <option key={u}>{u}</option>)}
+                      </select>
+                      <select
+                        className="rounded border border-gray-200 px-2 py-1 text-sm"
+                        value={food.category}
+                        onChange={e => {
+                          const updated = [...extractedFoods]
+                          updated[idx] = { ...food, category: e.target.value as ShoppingCategory }
+                          setExtractedFoods(updated)
+                        }}
+                      >
+                        {['protein', 'vegetables', 'fruits', 'dairy', 'grains', 'fats', 'other'].map(c => (
+                          <option key={c} value={c}>{categoryLabels[c]}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">{food.food_name}</span>
+                        <span className="text-xs text-gray-500 ml-2">{food.quantity} {food.unit}</span>
+                      </div>
+                      <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                        {categoryLabels[food.category] || food.category}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setEditingFood(editingFood === idx ? null : idx)}
+                      className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setExtractedFoods(extractedFoods.filter((_, i) => i !== idx))}
+                      className="p-1 text-gray-400 hover:text-red-500 rounded"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {docError && (
+              <div className="mx-6 mb-3 flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" /> {docError}
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-xl">
+              <p className="text-xs text-gray-500">
+                Puedes editar o eliminar alimentos antes de generar la lista
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowFoodsModal(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 rounded-lg">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCreateListFromFoods}
+                  disabled={creatingFromPdf || extractedFoods.length === 0}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {creatingFromPdf
+                    ? <><Loader2 className="h-4 w-4 animate-spin" />Generando...</>
+                    : <><ShoppingCart className="h-4 w-4" />Generar lista de compras</>}
+                </button>
+              </div>
             </div>
           </div>
         </div>
