@@ -79,7 +79,8 @@ export function PatientDetailPage() {
   })
   
   // Ficha médica state
-  const [fichaOpen, setFichaOpen] = useState(false)
+  const [fichaOpen, setFichaOpen] = useState(true)
+  const [fichaTab, setFichaTab] = useState<'docs' | 'history' | 'prefs'>('docs')
   const [newCondition, setNewCondition] = useState({ condition: '', notes: '', diagnosed_date: '' })
   const [addingCondition, setAddingCondition] = useState(false)
   const [newPreference, setNewPreference] = useState({ preference_type: 'allergy' as PreferenceType, value: '' })
@@ -87,6 +88,7 @@ export function PatientDetailPage() {
   const [uploadNotes, setUploadNotes] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState(false)
 
   const { data: patient, isLoading: loadingPatient } = usePatient(patientId || '')
   const { data: measurements = [] } = useMeasurements(patientId || '')
@@ -166,10 +168,13 @@ export function PatientDetailPage() {
     if (!file || !patientId) return
     setUploading(true)
     setUploadError(null)
+    setUploadSuccess(false)
     try {
       await uploadDocument.mutateAsync({ patientId, file, notes: uploadNotes || undefined })
       setUploadNotes('')
+      setUploadSuccess(true)
       e.target.value = ''
+      setTimeout(() => setUploadSuccess(false), 3000)
     } catch (err: any) {
       setUploadError(err.message || 'Error al subir el archivo')
     } finally {
@@ -615,91 +620,143 @@ export function PatientDetailPage() {
         </button>
 
         {fichaOpen && (
-          <div className="border-t border-gray-100 divide-y divide-gray-100">
+          <div className="border-t border-gray-100">
+            {/* ── Tabs ── */}
+            <div className="flex border-b border-gray-100">
+              {[
+                { key: 'docs' as const,    label: 'Documentos',    count: documents.length,      icon: '📄' },
+                { key: 'history' as const, label: 'Antecedentes',  count: medicalHistory.length, icon: '🩺' },
+                { key: 'prefs' as const,   label: 'Alergias',      count: preferences.length,    icon: '⚠️' },
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setFichaTab(tab.key)}
+                  className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    fichaTab === tab.key
+                      ? 'border-rose-500 text-rose-600 bg-rose-50'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <span>{tab.icon}</span>
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                      fichaTab === tab.key ? 'bg-rose-200 text-rose-700' : 'bg-gray-200 text-gray-600'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
 
-            {/* ── Documentos ── */}
+            {/* ── Tab: Documentos ── */}
+            {fichaTab === 'docs' && (
             <div className="p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Upload className="h-4 w-4 text-gray-500" />
-                  <h3 className="font-medium text-gray-900">Documentos</h3>
-                </div>
-                <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
-                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  {uploading ? 'Subiendo...' : 'Subir archivo'}
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx,image/*"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                  />
-                </label>
-              </div>
+              {/* Upload zone */}
+              <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-xl cursor-pointer transition-colors p-6 ${
+                uploading ? 'border-emerald-300 bg-emerald-50' : uploadSuccess ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 hover:border-rose-300 hover:bg-rose-50'
+              }`}>
+                {uploading ? (
+                  <>
+                    <Loader2 className="h-8 w-8 text-emerald-500 animate-spin mb-2" />
+                    <p className="text-sm font-medium text-emerald-600">Subiendo documento...</p>
+                  </>
+                ) : uploadSuccess ? (
+                  <>
+                    <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center mb-2">
+                      <svg className="h-6 w-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <p className="text-sm font-medium text-emerald-600">Documento subido correctamente</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="h-10 w-10 rounded-full bg-rose-100 flex items-center justify-center mb-2">
+                      <Upload className="h-5 w-5 text-rose-500" />
+                    </div>
+                    <p className="text-sm font-medium text-gray-700">Haz clic para subir un documento</p>
+                    <p className="text-xs text-gray-400 mt-1">PDF, Word, imagen — máx. 10 MB</p>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,image/*"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                />
+              </label>
+
+              <input
+                type="text"
+                value={uploadNotes}
+                onChange={e => setUploadNotes(e.target.value)}
+                placeholder="Descripción del documento (ej: Examen de sangre, Consentimiento...)"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-rose-400 focus:outline-none"
+              />
 
               {uploadError && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   {uploadError}
                 </div>
               )}
 
-              <div className="mb-2">
-                <input
-                  type="text"
-                  value={uploadNotes}
-                  onChange={e => setUploadNotes(e.target.value)}
-                  placeholder="Nota sobre el documento (opcional)"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-
               {documents.length === 0 ? (
-                <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">
-                  <FileText className="h-8 w-8 mx-auto text-gray-300 mb-2" />
-                  <p className="text-sm text-gray-500">No hay documentos subidos</p>
-                  <p className="text-xs text-gray-400 mt-1">PDF o imagen — máx. 10MB</p>
+                <div className="text-center py-4 text-gray-400 text-sm">
+                  Aún no hay documentos en la ficha médica
                 </div>
               ) : (
                 <ul className="space-y-2">
-                  {documents.map(doc => (
-                    <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-8 w-8 rounded bg-rose-100 flex items-center justify-center flex-shrink-0">
-                          <FileText className="h-4 w-4 text-rose-600" />
+                  {documents.map(doc => {
+                    const ext = doc.file_name.split('.').pop()?.toLowerCase() || ''
+                    const isPdf = ext === 'pdf'
+                    const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext)
+                    return (
+                      <li key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 group hover:border-gray-200 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold ${
+                            isPdf ? 'bg-red-100 text-red-600' : isImg ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {isPdf ? 'PDF' : isImg ? '🖼' : ext.toUpperCase() || '📄'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
+                            <p className="text-xs text-gray-400">
+                              {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
+                              {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
+                              {doc.notes ? ` · ${doc.notes}` : ''}
+                            </p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(doc.uploaded_at).toLocaleDateString('es-CL')}
-                            {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
-                            {doc.notes ? ` · ${doc.notes}` : ''}
-                          </p>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
+                          <button
+                            onClick={() => handleDownload(doc.file_path, doc.file_name)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            title="Descargar"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => handleDownload(doc.file_path, doc.file_name)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50"
-                          title="Descargar"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
+            )}
 
-            {/* ── Antecedentes médicos ── */}
+            {/* ── Tab: Antecedentes médicos ── */}
+            {fichaTab === 'history' && (
             <div className="p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -771,8 +828,10 @@ export function PatientDetailPage() {
                 </ul>
               )}
             </div>
+            )}
 
-            {/* ── Alergias y restricciones ── */}
+            {/* ── Tab: Alergias y restricciones ── */}
+            {fichaTab === 'prefs' && (
             <div className="p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -853,6 +912,7 @@ export function PatientDetailPage() {
                 </div>
               )}
             </div>
+            )}
 
           </div>
         )}
