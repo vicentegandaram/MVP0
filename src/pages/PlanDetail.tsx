@@ -94,30 +94,103 @@ export function PlanDetailPage() {
     a.href = url; a.download = fileName; a.target = '_blank'; a.click()
   }
 
-  // ── AI: analyze document → extract foods ────────────────────
+  // ── AI: analyze document → extract foods (Google Gemini — free tier) ──
   const handleAnalyzeDoc = async (filePath: string, docId: string) => {
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
+    if (!geminiKey) {
+      setDocError('Falta la API key de Gemini. Agrega VITE_GEMINI_API_KEY en tu .env.local y en Vercel.')
+      return
+    }
+
     setAnalyzingDocId(docId)
     setDocError(null)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-plan`,
+      // 1. Get signed URL and download the PDF
+      const signedUrl = await getDocumentSignedUrl(filePath)
+      if (!signedUrl) throw new Error('No se pudo obtener el enlace del archivo')
+
+      const fileRes = await fetch(signedUrl)
+      if (!fileRes.ok) throw new Error('No se pudo descargar el archivo')
+      const arrayBuffer = await fileRes.arrayBuffer()
+
+      // 2. Convert to base64
+      const uint8 = new Uint8Array(arrayBuffer)
+      let binary = ''
+      const chunkSize = 8192
+      for (let i = 0; i < uint8.length; i += chunkSize) {
+        binary += String.fromCharCode(...uint8.slice(i, i + chunkSize))
+      }
+      const base64Data = btoa(binary)
+
+      // 3. Call Gemini 1.5 Flash (free tier)
+      const geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ filePath }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: 'application/pdf', data: base64Data } },
+                {
+                  text: `Eres un asistente nutricional experto. Analiza esta pauta alimentaria y extrae TODOS los alimentos e ingredientes mencionados.
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{
+  "foods": [
+    { "food_name": "Avena", "quantity": 50, "unit": "g", "category": "grains" },
+    { "food_name": "Leche descremada", "quantity": 200, "unit": "ml", "category": "dairy" }
+  ]
+}
+
+Categorías válidas: protein, vegetables, fruits, dairy, grains, fats, other
+Unidades válidas: g, ml, piece, cup, tbsp
+
+Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cantidad exacta, estima semanal razonable. Solo devuelve el JSON.`
+                }
+              ]
+            }],
+            generationConfig: { temperature: 0.1 }
+          })
         }
       )
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      if (!data.foods || data.foods.length === 0) {
-        throw new Error('No se encontraron alimentos en el documento. Verifica que sea una pauta nutricional en PDF.')
+
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text()
+        throw new Error('Error de Gemini API: ' + errText.slice(0, 200))
       }
-      setExtractedFoods(data.foods)
+
+      const geminiData = await geminiRes.json()
+      const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+      // 4. Parse JSON from response
+      let foods: ExtractedFood[] = []
+      try {
+        foods = JSON.parse(responseText).foods || []
+      } catch {
+        const match = responseText.match(/\{[\s\S]*\}/)
+        if (match) {
+          try { foods = JSON.parse(match[0]).foods || [] } catch { /* empty */ }
+        }
+      }
+
+      // Validate
+      const validUnits = ['g', 'ml', 'piece', 'cup', 'tbsp']
+      const validCategories = ['protein', 'vegetables', 'fruits', 'dairy', 'grains', 'fats', 'other']
+      foods = foods
+        .map(f => ({
+          food_name: String(f.food_name || '').trim(),
+          quantity: Math.max(1, Number(f.quantity) || 100),
+          unit: validUnits.includes(f.unit) ? f.unit : 'g' as FoodUnit,
+          category: validCategories.includes(f.category) ? f.category : 'other' as ShoppingCategory,
+        }))
+        .filter(f => f.food_name.length > 0)
+
+      if (foods.length === 0) {
+        throw new Error('No se encontraron alimentos. Verifica que el archivo sea una pauta nutricional en PDF.')
+      }
+
+      setExtractedFoods(foods)
       setShowFoodsModal(true)
     } catch (err: any) {
       setDocError(err.message || 'Error al analizar el documento')
