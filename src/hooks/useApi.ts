@@ -953,3 +953,60 @@ export const getDocumentSignedUrl = async (filePath: string): Promise<string | n
   if (error) return null
   return data.signedUrl
 }
+
+// ============ FICHA CLÍNICA — DECRETO 41/2012 ============
+
+import type { ClinicalRecord, ClinicalRecordType } from '../types'
+
+export const useClinicalRecords = (patientId: string) => {
+  return useQuery({
+    queryKey: ['clinicalRecords', patientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clinical_record')
+        .select('*')
+        .eq('patient_id', patientId)
+        .order('recorded_at', { ascending: false })
+      if (error) throw error
+      return data as ClinicalRecord[]
+    },
+    enabled: !!patientId,
+  })
+}
+
+export const useCreateClinicalRecord = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (record: Partial<ClinicalRecord>) => {
+      const { data, error } = await supabase
+        .from('clinical_record')
+        .insert(record)
+        .select()
+        .single()
+      if (error) throw error
+      return data as ClinicalRecord
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['clinicalRecords', data.patient_id] })
+    },
+  })
+}
+
+export const useUpdateClinicalRecord = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...record }: Partial<ClinicalRecord> & { id: string }) => {
+      const { data, error } = await supabase
+        .from('clinical_record')
+        .update(record)
+        .eq('id', id)
+        .select()
+        .single()
+      if (error) throw error
+      return data as ClinicalRecord
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['clinicalRecords', data.patient_id] })
+    },
+  })
+}

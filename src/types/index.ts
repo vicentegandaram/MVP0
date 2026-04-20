@@ -30,11 +30,57 @@ export interface Patient {
   phone?: string
   birth_date?: string
   gender?: Gender
+  // Campos Decreto 41/2012
+  run?: string
+  address?: string
+  commune?: string
+  region?: string
+  nationality?: string
+  consent_signed?: boolean
+  consent_date?: string
+  // Contacto de emergencia
   emergency_contact_name?: string
   emergency_contact_phone?: string
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export type ClinicalRecordType =
+  | 'anamnesis'
+  | 'consultation'
+  | 'follow_up'
+  | 'evaluation'
+  | 'consent'
+  | 'discharge'
+
+export interface ClinicalRecord {
+  id: string
+  patient_id: string
+  nutritionist_id: string
+  record_type: ClinicalRecordType
+  // Anamnesis
+  reason_for_consultation?: string
+  current_illness?: string
+  medical_background?: string
+  family_background?: string
+  dietary_habits?: string
+  physical_activity?: string
+  // Diagnóstico
+  nutritional_diagnosis?: string
+  treatment_plan?: string
+  // Signos vitales
+  systolic_bp?: number
+  diastolic_bp?: number
+  // Consentimiento
+  consent_text?: string
+  consent_signed?: boolean
+  patient_signature_url?: string
+  // General
+  notes?: string
+  // Metadatos
+  recorded_at: string
+  created_at: string
 }
 
 export interface PatientGoal {
@@ -109,7 +155,6 @@ export interface Meal {
   plan_id: string
   day_of_week: number
   meal_type: MealType
-  meal_order: number
   name: string
   calories?: number
   protein?: number
