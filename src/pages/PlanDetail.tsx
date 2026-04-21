@@ -8,7 +8,7 @@ import {
 import {
   ChevronLeft, Plus, Flame, Utensils, Target, X, ShoppingCart, Sparkles,
   Loader2, Wand2, UtensilsCrossed, FileText, Upload, Download, Trash2,
-  AlertCircle, Brain, CheckCircle2, Pencil
+  AlertCircle, Brain, CheckCircle2, Pencil, Share2
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -436,6 +436,17 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
               <ShoppingCart className="h-4 w-4" />
               Lista de compras
             </Link>
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/p/${patientId}`
+                navigator.clipboard.writeText(url)
+                alert('Link copiado! Envíaselo a tu paciente:\n' + url)
+              }}
+              className="inline-flex items-center gap-2 text-sm text-violet-700 font-medium bg-violet-100 hover:bg-violet-200 px-4 py-2 rounded-lg transition-colors"
+            >
+              <Share2 className="h-4 w-4" />
+              Compartir con paciente
+            </button>
           </div>
         </div>
       ) : (

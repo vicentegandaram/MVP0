@@ -16,6 +16,7 @@ import { ShoppingListPage } from './pages/ShoppingList'
 import { LoginPage } from './pages/Login'
 import { RegisterPage } from './pages/Register'
 import { LandingPage } from './pages/Landing'
+import { PatientPortalPage } from './pages/PatientPortal'
 import { useEffect } from 'react'
 
 const queryClient = new QueryClient({
@@ -73,6 +74,10 @@ const router = createBrowserRouter([
   {
     path: '/landing',
     element: <LandingPage />,
+  },
+  {
+    path: '/p/:patientId',
+    element: <PatientPortalPage />,
   },
   {
     path: '/login',
