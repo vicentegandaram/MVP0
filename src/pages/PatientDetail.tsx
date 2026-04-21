@@ -367,6 +367,84 @@ export function PatientDetailPage() {
         </div>
       )}
 
+      {/* ── SUBIR DOCUMENTO (ZONA PROMINENTE) ── */}
+      <div className="bg-white rounded-xl border-2 border-dashed border-rose-200 p-6">
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="flex-1 text-center sm:text-left">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 justify-center sm:justify-start">
+              <Upload className="h-5 w-5 text-rose-500" />
+              Subir documento a la ficha clínica
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">Exámenes, consentimientos, fichas médicas — PDF, Word o imagen</p>
+          </div>
+          <div className="flex flex-col items-center gap-2 min-w-[200px]">
+            <label className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-medium cursor-pointer transition-colors ${
+              uploading ? 'bg-gray-100 text-gray-500' : uploadSuccess ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-600 text-white hover:bg-rose-700'
+            }`}>
+              {uploading ? (
+                <><Loader2 className="h-4 w-4 animate-spin" />Subiendo...</>
+              ) : uploadSuccess ? (
+                <><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>Subido!</>
+              ) : (
+                <><Upload className="h-4 w-4" />Seleccionar archivo</>
+              )}
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                className="hidden"
+                onChange={handleFileUpload}
+                disabled={uploading}
+              />
+            </label>
+            <input
+              type="text"
+              value={uploadNotes}
+              onChange={e => setUploadNotes(e.target.value)}
+              placeholder="Descripción (opcional)"
+              className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-rose-400 focus:outline-none"
+            />
+            {uploadError && (
+              <p className="text-xs text-red-600">{uploadError}</p>
+            )}
+          </div>
+        </div>
+        {documents.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <p className="text-xs text-gray-400 mb-2">{documents.length} documento{documents.length !== 1 ? 's' : ''} en la ficha</p>
+            <div className="flex flex-wrap gap-2">
+              {documents.slice(0, 5).map(doc => {
+                const ext = doc.file_name.split('.').pop()?.toLowerCase() || ''
+                return (
+                  <div key={doc.id} className="inline-flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5 text-xs group">
+                    <span className={`font-bold ${ext === 'pdf' ? 'text-red-500' : 'text-blue-500'}`}>
+                      {ext.toUpperCase()}
+                    </span>
+                    <span className="text-gray-700 max-w-[120px] truncate">{doc.file_name}</span>
+                    <button
+                      onClick={() => handleDownload(doc.file_path, doc.file_name)}
+                      className="text-gray-400 hover:text-blue-600"
+                      title="Descargar"
+                    >
+                      <Download className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
+                      className="text-gray-400 hover:text-red-600"
+                      title="Eliminar"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )
+              })}
+              {documents.length > 5 && (
+                <span className="text-xs text-gray-400 self-center">+{documents.length - 5} más</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Weight Chart */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6">

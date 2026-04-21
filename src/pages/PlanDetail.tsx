@@ -379,6 +379,89 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
         </div>
       </div>
 
+      {/* ── SUBIR PAUTA NUTRICIONAL (PROMINENTE) ── */}
+      <div className="bg-white rounded-xl border-2 border-dashed border-violet-200 p-6">
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="flex-1 text-center sm:text-left">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 justify-center sm:justify-start">
+              <FileText className="h-5 w-5 text-violet-500" />
+              Subir pauta nutricional
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Sube un PDF con la pauta y la IA extraerá los alimentos para generar la lista de compras
+            </p>
+          </div>
+          <div className="flex flex-col items-center gap-2 min-w-[200px]">
+            <label className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-medium cursor-pointer transition-colors ${
+              uploadingDoc ? 'bg-gray-100 text-gray-500' : 'bg-violet-600 text-white hover:bg-violet-700'
+            }`}>
+              {uploadingDoc
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Subiendo...</>
+                : <><Upload className="h-4 w-4" />Seleccionar archivo</>}
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                className="hidden"
+                onChange={handlePlanDocUpload}
+                disabled={uploadingDoc}
+              />
+            </label>
+            <input
+              type="text"
+              value={docNotes}
+              onChange={e => setDocNotes(e.target.value)}
+              placeholder="Descripción (opcional)"
+              className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-violet-400 focus:outline-none"
+            />
+            {docError && <p className="text-xs text-red-600">{docError}</p>}
+          </div>
+        </div>
+        {planDocuments.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
+            <p className="text-xs text-gray-400 mb-2">{planDocuments.length} pauta{planDocuments.length !== 1 ? 's' : ''} subida{planDocuments.length !== 1 ? 's' : ''}</p>
+            {planDocuments.map(doc => {
+              const isPdf = doc.file_name.toLowerCase().endsWith('.pdf')
+              const isAnalyzing = analyzingDocId === doc.id
+              return (
+                <div key={doc.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-xs font-bold text-violet-600">
+                      {doc.file_name.split('.').pop()?.toUpperCase()}
+                    </span>
+                    <span className="text-sm text-gray-700 truncate">{doc.file_name}</span>
+                  </div>
+                  <div className="flex items-center gap-1 ml-2 shrink-0">
+                    {isPdf && (
+                      <button
+                        onClick={() => handleAnalyzeDoc(doc.file_path, doc.id)}
+                        disabled={isAnalyzing || !!analyzingDocId}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-violet-700 bg-violet-100 hover:bg-violet-200 disabled:opacity-50"
+                      >
+                        {isAnalyzing
+                          ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Analizando...</>
+                          : <><Brain className="h-3.5 w-3.5" />Analizar con IA</>}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDownload(doc.file_path, doc.file_name)}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50"
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => deleteDocument.mutate({ id: doc.id, filePath: doc.file_path, patientId: patientId! })}
+                      className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Active Plan Card */}
       {activePlan ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
