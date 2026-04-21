@@ -166,6 +166,18 @@ export function PatientDetailPage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !patientId) return
+    const maxSize = 10 * 1024 * 1024
+    if (file.size > maxSize) {
+      setUploadError(`El archivo pesa ${(file.size / 1024 / 1024).toFixed(1)} MB. Máximo permitido: 10 MB`)
+      e.target.value = ''
+      return
+    }
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/')) {
+      setUploadError('Tipo de archivo no soportado. Usa PDF, Word o imagen.')
+      e.target.value = ''
+      return
+    }
     setUploading(true)
     setUploadError(null)
     setUploadSuccess(false)

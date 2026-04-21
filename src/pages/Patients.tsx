@@ -231,7 +231,7 @@ export function PatientsPage() {
                             Lista de compras
                           </Link>
                           <Link
-                            to={`/patients/${patient.id}#ficha`}
+                            to={`/patients/${patient.id}`}
                             onClick={() => setOpenDropdown(null)}
                             className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
                           >

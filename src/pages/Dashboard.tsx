@@ -29,60 +29,62 @@ export function DashboardPage() {
 
   useEffect(() => {
     const checkPatientsAtRisk = async () => {
-      const atRisk: PatientAtRisk[] = []
-      
-      for (const patient of patients) {
-        const { data: measurements } = await supabase
+      try {
+        if (patients.length === 0) return
+
+        const patientIds = patients.map(p => p.id)
+        const { data: allMeasurements } = await supabase
           .from('measurement')
-          .select('recorded_at')
-          .eq('patient_id', patient.id)
+          .select('patient_id, recorded_at')
+          .in('patient_id', patientIds)
           .order('recorded_at', { ascending: false })
-          .limit(1)
-          .single()
-        
-        const patientAppointments = appointments.filter(a => a.patient_id === patient.id)
-        const lastAppointment = patientAppointments
-          .filter(a => new Date(a.scheduled_at) < new Date())
-          .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())[0]
-        
-        const daysSinceLastMeasurement = measurements?.recorded_at 
-          ? differenceInDays(new Date(), new Date(measurements.recorded_at))
-          : null
-        
-        const daysSinceLastAppointment = lastAppointment
-          ? differenceInDays(new Date(), new Date(lastAppointment.scheduled_at))
-          : null
-        
-        if (daysSinceLastMeasurement !== null && daysSinceLastMeasurement > 21) {
-          atRisk.push({
-            id: patient.id,
-            name: patient.name,
-            last_name: patient.last_name || '',
-            reason: `Sin mediciones desde hace ${daysSinceLastMeasurement} días`,
-            severity: daysSinceLastMeasurement > 30 ? 'high' : 'medium',
-            daysSinceLastMeasurement
-          })
-        } else if (daysSinceLastAppointment !== null && daysSinceLastAppointment > 35) {
-          atRisk.push({
-            id: patient.id,
-            name: patient.name,
-            last_name: patient.last_name || '',
-            reason: `Última cita hace ${daysSinceLastAppointment} días`,
-            severity: 'high'
-          })
+
+        const latestByPatient: Record<string, string> = {}
+        for (const m of allMeasurements || []) {
+          if (!latestByPatient[m.patient_id]) latestByPatient[m.patient_id] = m.recorded_at
         }
+
+        const atRisk: PatientAtRisk[] = []
+        for (const patient of patients) {
+          const lastRecorded = latestByPatient[patient.id]
+          const daysSinceLastMeasurement = lastRecorded
+            ? differenceInDays(new Date(), new Date(lastRecorded))
+            : null
+
+          const lastAppointment = appointments
+            .filter(a => a.patient_id === patient.id && new Date(a.scheduled_at) < new Date())
+            .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())[0]
+          const daysSinceLastAppointment = lastAppointment
+            ? differenceInDays(new Date(), new Date(lastAppointment.scheduled_at))
+            : null
+
+          if (daysSinceLastMeasurement !== null && daysSinceLastMeasurement > 21) {
+            atRisk.push({
+              id: patient.id, name: patient.name, last_name: patient.last_name || '',
+              reason: `Sin mediciones desde hace ${daysSinceLastMeasurement} días`,
+              severity: daysSinceLastMeasurement > 30 ? 'high' : 'medium',
+              daysSinceLastMeasurement
+            })
+          } else if (daysSinceLastAppointment !== null && daysSinceLastAppointment > 35) {
+            atRisk.push({
+              id: patient.id, name: patient.name, last_name: patient.last_name || '',
+              reason: `Última cita hace ${daysSinceLastAppointment} días`,
+              severity: 'high'
+            })
+          }
+        }
+
+        setPatientsAtRisk(atRisk.sort((a, b) => {
+          if (a.severity === 'high' && b.severity !== 'high') return -1
+          if (b.severity === 'high' && a.severity !== 'high') return 1
+          return 0
+        }))
+      } catch (err) {
+        console.error('Error checking patients at risk:', err)
       }
-      
-      setPatientsAtRisk(atRisk.sort((a, b) => {
-        if (a.severity === 'high' && b.severity !== 'high') return -1
-        if (b.severity === 'high' && a.severity !== 'high') return 1
-        return 0
-      }))
     }
-    
-    if (patients.length > 0) {
-      checkPatientsAtRisk()
-    }
+
+    if (patients.length > 0) checkPatientsAtRisk()
   }, [patients, appointments])
 
   const todayAppointments = appointments.filter(a => isToday(new Date(a.scheduled_at)))

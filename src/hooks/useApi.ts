@@ -483,27 +483,20 @@ export const useMealsWithFoods = (planId: string) => {
   return useQuery({
     queryKey: ['mealsWithFoods', planId],
     queryFn: async () => {
-      const { data: meals, error } = await supabase
+      const { data, error } = await supabase
         .from('meal')
-        .select('*')
+        .select('*, meal_food(*)')
         .eq('plan_id', planId)
         .order('day_of_week', { ascending: true })
         .order('meal_type', { ascending: true })
-      
+
       if (error) throw error
-      
-      const mealsWithFoods = await Promise.all(
-        meals.map(async (meal) => {
-          const { data: foods } = await supabase
-            .from('meal_food')
-            .select('*')
-            .eq('meal_id', meal.id)
-          
-          return { ...meal, foods: foods || [] }
-        })
-      )
-      
-      return mealsWithFoods as (Meal & { foods: MealFood[] })[]
+
+      return (data || []).map(meal => ({
+        ...meal,
+        foods: (meal.meal_food || []) as MealFood[],
+        meal_food: undefined,
+      })) as (Meal & { foods: MealFood[] })[]
     },
     enabled: !!planId,
   })

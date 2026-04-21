@@ -69,6 +69,12 @@ export function PlanDetailPage() {
   const handlePlanDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !patientId) return
+    const maxSize = 10 * 1024 * 1024
+    if (file.size > maxSize) {
+      setDocError(`El archivo pesa ${(file.size / 1024 / 1024).toFixed(1)} MB. Máximo permitido: 10 MB`)
+      e.target.value = ''
+      return
+    }
     setUploadingDoc(true)
     setDocError(null)
     try {
@@ -170,7 +176,10 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
       } catch {
         const match = responseText.match(/\{[\s\S]*\}/)
         if (match) {
-          try { foods = JSON.parse(match[0]).foods || [] } catch { /* empty */ }
+          try { foods = JSON.parse(match[0]).foods || [] } catch { /* fallback below */ }
+        }
+        if (foods.length === 0 && responseText.length > 0) {
+          console.warn('Gemini response could not be parsed:', responseText.slice(0, 500))
         }
       }
 
