@@ -13,6 +13,9 @@ import {
 } from 'lucide-react'
 import { usePatient, useActiveNutritionPlan, useMeals, useShoppingList } from '../hooks/useApi'
 import { supabase } from '../lib/supabase'
+import { toast } from '../lib/toast'
+import { confirm } from '../lib/confirm'
+import { logger } from '../lib/logger'
 import type { Meal } from '../types'
 
 interface AggregatedItem {
@@ -64,7 +67,7 @@ export function ShoppingListPage() {
 
   const regenerateShoppingList = async () => {
     if (!activePlan || !patientId) return
-    if (!window.confirm('Esto reemplazará la lista de compras actual. ¿Continuar?')) return
+    if (!(await confirm('Esto reemplazará la lista de compras actual. ¿Continuar?', { title: 'Regenerar lista', confirmText: 'Continuar' }))) return
     setGenerating(true)
     try {
       // Eliminar lista anterior
@@ -74,8 +77,8 @@ export function ShoppingListPage() {
       }
       await generateShoppingListCore()
     } catch (err) {
-      console.error('Error regenerando lista:', err)
-      alert('Error al regenerar la lista de compras')
+      logger.error('Error regenerando lista:', err)
+      toast.error('Error al regenerar la lista de compras')
     } finally {
       setGenerating(false)
     }
@@ -140,8 +143,8 @@ export function ShoppingListPage() {
     try {
       await generateShoppingListCore()
     } catch (err) {
-      console.error('Error generating shopping list:', err)
-      alert('Error al generar la lista de compras')
+      logger.error('Error generating shopping list:', err)
+      toast.error('Error al generar la lista de compras')
     } finally {
       setGenerating(false)
     }
@@ -309,7 +312,7 @@ export function ShoppingListPage() {
                 {expandedCategories[group.category] !== false && (
                   <div className="border-t border-gray-100 p-4 space-y-2">
                     {group.items.map((item, idx) => {
-                      const originalItem = shoppingList.items?.find(
+                      const originalItem = shoppingList?.items?.find(
                         i => i.food_name === item.name && i.category === item.category
                       )
                       return (

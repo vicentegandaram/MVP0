@@ -14,6 +14,8 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { getTemplatesForObjective, MealObjective } from '../data/mealTemplates'
 import { supabase } from '../lib/supabase'
+import { toast } from '../lib/toast'
+import { getErrorMessage } from '../lib/errors'
 import type { FoodUnit, ShoppingCategory } from '../types'
 
 interface ExtractedFood {
@@ -85,8 +87,8 @@ export function PlanDetailPage() {
       })
       setDocNotes('')
       e.target.value = ''
-    } catch (err: any) {
-      setDocError(err.message || 'Error al subir el archivo')
+    } catch (err) {
+      setDocError(getErrorMessage(err, 'Error al subir el archivo'))
     } finally {
       setUploadingDoc(false)
     }
@@ -95,114 +97,35 @@ export function PlanDetailPage() {
   // ── Download document ────────────────────────────────────────
   const handleDownload = async (filePath: string, fileName: string) => {
     const url = await getDocumentSignedUrl(filePath)
-    if (!url) return alert('No se pudo obtener el enlace')
+    if (!url) {
+      toast.error('No se pudo obtener el enlace')
+      return
+    }
     const a = document.createElement('a')
     a.href = url; a.download = fileName; a.target = '_blank'; a.click()
   }
 
-  // ── AI: analyze document → extract foods (Google Gemini — free tier) ──
+  // ── AI: analyze document → extract foods (Edge Function: parse-plan) ──
   const handleAnalyzeDoc = async (filePath: string, docId: string) => {
-    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
-    if (!geminiKey) {
-      setDocError('Falta la API key de Gemini. Agrega VITE_GEMINI_API_KEY en tu .env.local y en Vercel.')
-      return
-    }
-
     setAnalyzingDocId(docId)
     setDocError(null)
     try {
-      // 1. Get signed URL and download the PDF
-      const signedUrl = await getDocumentSignedUrl(filePath)
-      if (!signedUrl) throw new Error('No se pudo obtener el enlace del archivo')
+      const { data, error: fnError } = await supabase.functions.invoke('parse-plan', {
+        body: { filePath },
+      })
 
-      const fileRes = await fetch(signedUrl)
-      if (!fileRes.ok) throw new Error('No se pudo descargar el archivo')
-      const arrayBuffer = await fileRes.arrayBuffer()
+      if (fnError) throw new Error(fnError.message || 'Error al invocar la función')
+      if (data?.error) throw new Error(data.error)
 
-      // 2. Convert to base64
-      const uint8 = new Uint8Array(arrayBuffer)
-      let binary = ''
-      const chunkSize = 8192
-      for (let i = 0; i < uint8.length; i += chunkSize) {
-        binary += String.fromCharCode(...uint8.slice(i, i + chunkSize))
-      }
-      const base64Data = btoa(binary)
-
-      // 3. Call Gemini 1.5 Flash (free tier)
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: 'application/pdf', data: base64Data } },
-                {
-                  text: `Eres un asistente nutricional experto. Analiza esta pauta alimentaria y extrae TODOS los alimentos e ingredientes mencionados.
-
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{
-  "foods": [
-    { "food_name": "Avena", "quantity": 50, "unit": "g", "category": "grains" },
-    { "food_name": "Leche descremada", "quantity": 200, "unit": "ml", "category": "dairy" }
-  ]
-}
-
-Categorías válidas: protein, vegetables, fruits, dairy, grains, fats, other
-Unidades válidas: g, ml, piece, cup, tbsp
-
-Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cantidad exacta, estima semanal razonable. Solo devuelve el JSON.`
-                }
-              ]
-            }],
-            generationConfig: { temperature: 0.1 }
-          })
-        }
-      )
-
-      if (!geminiRes.ok) {
-        const errText = await geminiRes.text()
-        throw new Error('Error de Gemini API: ' + errText.slice(0, 200))
-      }
-
-      const geminiData = await geminiRes.json()
-      const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ''
-
-      // 4. Parse JSON from response
-      let foods: ExtractedFood[] = []
-      try {
-        foods = JSON.parse(responseText).foods || []
-      } catch {
-        const match = responseText.match(/\{[\s\S]*\}/)
-        if (match) {
-          try { foods = JSON.parse(match[0]).foods || [] } catch { /* fallback below */ }
-        }
-        if (foods.length === 0 && responseText.length > 0) {
-          console.warn('Gemini response could not be parsed:', responseText.slice(0, 500))
-        }
-      }
-
-      // Validate
-      const validUnits = ['g', 'ml', 'piece', 'cup', 'tbsp']
-      const validCategories = ['protein', 'vegetables', 'fruits', 'dairy', 'grains', 'fats', 'other']
-      foods = foods
-        .map(f => ({
-          food_name: String(f.food_name || '').trim(),
-          quantity: Math.max(1, Number(f.quantity) || 100),
-          unit: validUnits.includes(f.unit) ? f.unit : 'g' as FoodUnit,
-          category: validCategories.includes(f.category) ? f.category : 'other' as ShoppingCategory,
-        }))
-        .filter(f => f.food_name.length > 0)
-
+      const foods = (data?.foods ?? []) as ExtractedFood[]
       if (foods.length === 0) {
         throw new Error('No se encontraron alimentos. Verifica que el archivo sea una pauta nutricional en PDF.')
       }
 
       setExtractedFoods(foods)
       setShowFoodsModal(true)
-    } catch (err: any) {
-      setDocError(err.message || 'Error al analizar el documento')
+    } catch (err) {
+      setDocError(getErrorMessage(err, 'Error al analizar el documento'))
     } finally {
       setAnalyzingDocId(null)
     }
@@ -255,8 +178,8 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
 
       setShowFoodsModal(false)
       navigate(`/plans/${patientId}/shopping`)
-    } catch (err: any) {
-      setDocError(err.message || 'Error al generar la lista')
+    } catch (err) {
+      setDocError(getErrorMessage(err, 'Error al generar la lista'))
     } finally {
       setCreatingFromPdf(false)
     }
@@ -353,8 +276,8 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
       await queryClient.refetchQueries({ queryKey: ['nutritionPlan', 'active', patientId] })
 
       setShowModal(false)
-    } catch (err: any) {
-      setError(err.message || 'Error al generar el plan')
+    } catch (err) {
+      setError(getErrorMessage(err, 'Error al generar el plan'))
     } finally {
       setGeneratingPlan(false)
     }
@@ -529,10 +452,19 @@ Reglas: suma las cantidades del mismo alimento en toda la semana. Si no hay cant
               Lista de compras
             </Link>
             <button
-              onClick={() => {
-                const url = `${window.location.origin}/p/${patientId}`
+              onClick={async () => {
+                const { data, error } = await supabase
+                  .from('patient')
+                  .select('portal_token')
+                  .eq('id', patientId!)
+                  .single()
+                if (error || !data?.portal_token) {
+                  toast.error('No se pudo generar el link del portal. Revisa que la migración portal_secure esté aplicada.')
+                  return
+                }
+                const url = `${window.location.origin}/p/${data.portal_token}`
                 navigator.clipboard.writeText(url)
-                alert('Link copiado! Envíaselo a tu paciente:\n' + url)
+                toast.success('Link copiado al portapapeles')
               }}
               className="inline-flex items-center gap-2 text-sm text-violet-700 font-medium bg-violet-100 hover:bg-violet-200 px-4 py-2 rounded-lg transition-colors"
             >

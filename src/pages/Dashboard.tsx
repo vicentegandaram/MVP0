@@ -2,6 +2,7 @@ import { Users, Calendar, TrendingUp, Clock, AlertTriangle, TrendingDown } from 
 import { Link } from 'react-router-dom'
 import { usePatients, useAppointments } from '../hooks/useApi'
 import { supabase } from '../lib/supabase'
+import { logger } from '../lib/logger'
 import { format, isToday, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useState, useEffect } from 'react'
@@ -80,7 +81,7 @@ export function DashboardPage() {
           return 0
         }))
       } catch (err) {
-        console.error('Error checking patients at risk:', err)
+        logger.error('Error checking patients at risk:', err)
       }
     }
 

@@ -5,6 +5,7 @@ import {
   MoreVertical, UtensilsCrossed, ShoppingCart, FileText, ChevronRight
 } from 'lucide-react'
 import { usePatients, useDeletePatient } from '../hooks/useApi'
+import { confirm } from '../lib/confirm'
 import { format, differenceInYears } from 'date-fns'
 import { es } from 'date-fns/locale'
 
@@ -15,7 +16,7 @@ export function PatientsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLTableSectionElement>(null)
 
   const calculateAge = (birthDate: string | undefined): string => {
     if (!birthDate) return '-'
@@ -42,7 +43,7 @@ export function PatientsPage() {
 
   const handleDelete = async (id: string) => {
     setOpenDropdown(null)
-    if (confirm('¿Eliminar este paciente?')) {
+    if (await confirm('¿Eliminar este paciente?', { title: 'Eliminar paciente', confirmText: 'Eliminar', destructive: true })) {
       await deletePatient.mutateAsync(id)
     }
   }

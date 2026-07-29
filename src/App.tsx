@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './store'
 import { Layout } from './components/layout/Layout'
 import { DBConnectionChecker } from './components/common/DBConnectionChecker'
+import { Toaster } from './components/common/Toaster'
+import { ConfirmDialog } from './components/common/ConfirmDialog'
 import { DashboardPage } from './pages/Dashboard'
 import { PatientsPage } from './pages/Patients'
 import { PatientNewPage } from './pages/PatientNew'
@@ -76,7 +78,7 @@ const router = createBrowserRouter([
     element: <LandingPage />,
   },
   {
-    path: '/p/:patientId',
+    path: '/p/:token',
     element: <PatientPortalPage />,
   },
   {
@@ -160,6 +162,8 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      <Toaster />
+      <ConfirmDialog />
     </QueryClientProvider>
   )
 }

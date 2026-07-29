@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { logger } from '../lib/logger'
 import type { Nutritionist, Patient } from '../types'
 
 // UI Store
@@ -36,7 +37,7 @@ interface AuthState {
   error: string | null
   
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, profile: { name: string; lastName: string; email: string; licenseNumber?: string }) => Promise<void>
+  register: (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string }) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
   loadNutritionistProfile: () => Promise<void>
@@ -55,26 +56,20 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
             email,
-            password
+            password,
           })
-          
+
           if (error) throw error
-          
-          set({ 
-            user: data.user, 
-            isLoading: false 
-          })
-          
+
+          set({ user: data.user, isLoading: false })
           await get().loadNutritionistProfile()
-        } catch (error: any) {
-          set({ 
-            isLoading: false, 
-            error: error.message || 'Error al iniciar sesión' 
-          })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Error al iniciar sesión'
+          set({ isLoading: false, error: message })
         }
       },
 
-      register: async (email: string, password: string, profile: { name: string; lastName: string; email: string; licenseNumber?: string }) => {
+      register: async (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string }) => {
         set({ isLoading: true, error: null })
         try {
           const { data, error } = await supabase.auth.signUp({
@@ -83,34 +78,29 @@ export const useAuthStore = create<AuthState>()(
             options: {
               data: {
                 name: profile.name,
-                last_name: profile.lastName
-              }
-            }
-          })
-          
-          if (error) throw error
-          
-          if (data.user) {
-            await supabase
-              .from('nutritionist')
-              .insert({
-                user_id: data.user.id,
-                name: profile.name,
                 last_name: profile.lastName,
-                email: profile.email,
-                license_number: profile.licenseNumber
-              })
-            
-            set({ 
-              user: data.user, 
-              isLoading: false 
-            })
-          }
-        } catch (error: any) {
-          set({ 
-            isLoading: false, 
-            error: error.message || 'Error al crear cuenta' 
+                license_number: profile.licenseNumber || null,
+              },
+            },
           })
+
+          if (error) throw error
+
+          // El trigger `on_auth_user_created_create_nutritionist` crea la fila
+          // en `nutritionist` automáticamente con los metadatos de arriba.
+          if (data.user) {
+            set({ user: data.user })
+            // Si Supabase auto-confirma el email, ya hay sesión y podemos cargar el perfil.
+            // Si requiere confirmación, no hay sesión todavía: el perfil se cargará en checkAuth().
+            if (data.session) {
+              await get().loadNutritionistProfile()
+            }
+          }
+
+          set({ isLoading: false })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Error al crear cuenta'
+          set({ isLoading: false, error: message })
         }
       },
 
@@ -129,7 +119,7 @@ export const useAuthStore = create<AuthState>()(
             await get().loadNutritionistProfile()
           }
         } catch (error) {
-          console.error('Auth check error:', error)
+          logger.error('Auth check error:', error)
         } finally {
           set({ isLoading: false })
         }

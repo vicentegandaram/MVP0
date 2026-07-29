@@ -26,3 +26,9 @@ dist-ssr
 .env
 .env.local
 .env.production
+
+# Scripts locales con credenciales (NO commitear)
+audit_schema.mjs
+
+# Supabase CLI
+supabase/.temp/

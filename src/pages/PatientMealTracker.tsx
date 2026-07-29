@@ -17,6 +17,9 @@ import {
 import { format, addDays, subDays, startOfWeek, isSameDay, isAfter, isBefore, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
+import { toast } from '../lib/toast'
+import { getErrorMessage } from '../lib/errors'
+import { logger } from '../lib/logger'
 import type { Meal, MealLog, NutritionPlan } from '../types'
 
 const MEAL_TYPES = [
@@ -123,7 +126,7 @@ export function PatientMealTrackerPage() {
 
       await loadAdherence()
     } catch (error) {
-      console.error('Error loading data:', error)
+      logger.error('Error loading data:', error)
     } finally {
       setLoading(false)
     }
@@ -201,8 +204,8 @@ export function PatientMealTrackerPage() {
       }
 
       await loadData()
-    } catch (error) {
-      console.error('Error updating meal:', error)
+    } catch (err) {
+      toast.error('No se pudo actualizar la comida: ' + getErrorMessage(err))
     } finally {
       setSaving(false)
     }

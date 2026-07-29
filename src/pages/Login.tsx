@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store'
 import { Loader2 } from 'lucide-react'
+import { toast } from '../lib/toast'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -11,7 +12,7 @@ export function LoginPage() {
     if (user && nutritionist) {
       navigate('/')
     } else if (user && !nutritionist) {
-      alert('Tu cuenta no tiene perfil de nutricionista. Usa demo@nutriflow.com / demo123456 para probar.')
+      toast.error('Tu cuenta no tiene un perfil de nutricionista asociado. Contactá soporte.')
     }
   }, [user, nutritionist, navigate])
 

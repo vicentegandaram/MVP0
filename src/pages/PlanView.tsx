@@ -30,6 +30,7 @@ import {
   useUpdateMealFood,
   useDeleteMealFood
 } from '../hooks/useApi'
+import { confirm } from '../lib/confirm'
 import type { MealFood, FoodUnit, ShoppingCategory } from '../types'
 
 const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -207,7 +208,7 @@ export function PlanViewPage() {
 
   const handleDeleteMeal = async (mealId: string) => {
     if (!activePlan) return
-    if (!window.confirm('¿Eliminar esta comida?')) return
+    if (!(await confirm('¿Eliminar esta comida?', { title: 'Eliminar comida', confirmText: 'Eliminar', destructive: true }))) return
     await deleteMeal.mutateAsync({ id: mealId, planId: activePlan.id })
     setEditingMealId(null)
   }
@@ -229,7 +230,7 @@ export function PlanViewPage() {
   }
 
   const handleDeleteFood = async (foodId: string) => {
-    if (!window.confirm('¿Eliminar este alimento?')) return
+    if (!(await confirm('¿Eliminar este alimento?', { title: 'Eliminar alimento', confirmText: 'Eliminar', destructive: true }))) return
     await deleteMealFood.mutateAsync(foodId)
   }
 

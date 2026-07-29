@@ -43,6 +43,9 @@ import {
   usePatientDocuments, useUploadDocument, useDeleteDocument, getDocumentSignedUrl,
   usePatientPreferences, useCreatePatientPreference, useDeletePatientPreference
 } from '../hooks/useApi'
+import { toast } from '../lib/toast'
+import { confirm } from '../lib/confirm'
+import { getErrorMessage } from '../lib/errors'
 import type { PatientObjective, PreferenceType } from '../types'
 
 const getObjectiveLabel = (obj: PatientObjective): string => {
@@ -143,10 +146,10 @@ export function PatientDetailPage() {
 
       setShowMeasurementModal(false)
       setFormData({ weight: '', height: '', waist_circumference: '', hip_circumference: '', body_fat_percentage: '', muscle_mass: '', notes: '' })
-    } catch (error: any) {
-      const msg = error?.message || error?.error?.message || JSON.stringify(error)
-      setMeasurementError(msg.includes('policy') || msg.includes('RLS') || msg.includes('permission')
-        ? 'Sin permisos para guardar. Asegúrate de estar logueado correctamente.'
+    } catch (err) {
+      const msg = getErrorMessage(err)
+      setMeasurementError(/policy|RLS|permission/i.test(msg)
+        ? 'Sin permisos para guardar. Asegurate de estar logueado correctamente.'
         : 'Error al guardar: ' + msg)
     } finally {
       setIsSaving(false)
@@ -187,21 +190,25 @@ export function PatientDetailPage() {
       setUploadSuccess(true)
       e.target.value = ''
       setTimeout(() => setUploadSuccess(false), 3000)
-    } catch (err: any) {
-      setUploadError(err.message || 'Error al subir el archivo')
+    } catch (err) {
+      setUploadError(getErrorMessage(err, 'Error al subir el archivo'))
     } finally {
       setUploading(false)
     }
   }
 
   const handleDeleteDocument = async (id: string, filePath: string) => {
-    if (!patientId || !window.confirm('¿Eliminar este documento?')) return
+    if (!patientId) return
+    if (!(await confirm('¿Eliminar este documento?', { title: 'Eliminar documento', confirmText: 'Eliminar', destructive: true }))) return
     await deleteDocument.mutateAsync({ id, filePath, patientId })
   }
 
   const handleDownload = async (filePath: string, fileName: string) => {
     const url = await getDocumentSignedUrl(filePath)
-    if (!url) return alert('No se pudo obtener el enlace de descarga')
+    if (!url) {
+      toast.error('No se pudo obtener el enlace de descarga')
+      return
+    }
     const a = document.createElement('a')
     a.href = url
     a.download = fileName

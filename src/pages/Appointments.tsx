@@ -8,6 +8,7 @@ import {
 import { es } from 'date-fns/locale'
 import { useAuthStore } from '../store'
 import { supabase } from '../lib/supabase'
+import { getErrorMessage } from '../lib/errors'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -160,9 +161,8 @@ export function AppointmentsPage() {
       })
       setShowModal(false)
       reset()
-    } catch (error: any) {
-      const msg = error?.message || error?.error?.message || JSON.stringify(error)
-      setFormError('Error al crear la cita: ' + msg)
+    } catch (err) {
+      setFormError('Error al crear la cita: ' + getErrorMessage(err))
     }
   }
 

@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { ArrowLeft, Save } from 'lucide-react'
 import { useCreatePatient, useUpdatePatient, usePatient } from '../hooks/useApi'
 import { useAuthStore } from '../store'
+import { getErrorMessage } from '../lib/errors'
 import { useEffect, useState } from 'react'
 
 const patientSchema = z.object({
@@ -79,8 +80,8 @@ export function PatientNewPage() {
         await createPatient.mutateAsync({ ...cleanData, nutritionist_id: nutritionistId, is_active: true })
         navigate('/patients')
       }
-    } catch (error: any) {
-      setSaveError(error?.message || 'Error al guardar el paciente')
+    } catch (err) {
+      setSaveError(getErrorMessage(err, 'Error al guardar el paciente'))
     }
   }
 

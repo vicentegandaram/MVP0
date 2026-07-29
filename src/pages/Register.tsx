@@ -39,8 +39,7 @@ export function RegisterPage() {
     await register(formData.email, formData.password, {
       name: formData.name,
       lastName: formData.lastName,
-      email: formData.email,
-      licenseNumber: formData.licenseNumber
+      licenseNumber: formData.licenseNumber || undefined,
     })
   }
 

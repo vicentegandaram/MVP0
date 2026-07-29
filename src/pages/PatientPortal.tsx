@@ -4,9 +4,10 @@ import {
   Flame, Utensils, Droplets, Activity,
   ChevronLeft, ChevronRight,
   ShoppingCart, CheckCircle2, Circle,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, X, MinusCircle
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { getErrorMessage } from '../lib/errors'
 
 const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -91,14 +92,33 @@ interface ShoppingListData {
   items: ShoppingItemData[]
 }
 
+type MealStatus = 'completed' | 'partial' | 'missed' | 'skipped'
+
+interface MealLogEntry {
+  meal_id: string
+  log_date: string
+  status: MealStatus
+}
+
+interface PortalBundle {
+  patient: PatientData & { id: string }
+  plan: PlanData | null
+  meals: MealData[]
+  shopping_list: ShoppingListData | null
+  meal_logs: MealLogEntry[]
+  week_start: string
+}
+
 export function PatientPortalPage() {
-  const { patientId } = useParams<{ patientId: string }>()
+  const { token } = useParams<{ token: string }>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [patient, setPatient] = useState<PatientData | null>(null)
   const [plan, setPlan] = useState<PlanData | null>(null)
   const [meals, setMeals] = useState<MealData[]>([])
   const [shoppingList, setShoppingList] = useState<ShoppingListData | null>(null)
+  const [mealLogs, setMealLogs] = useState<MealLogEntry[]>([])
+  const [weekStart, setWeekStart] = useState<string>('')
   const [selectedDay, setSelectedDay] = useState(() => {
     const today = new Date().getDay()
     return today === 0 ? 7 : today
@@ -107,63 +127,33 @@ export function PatientPortalPage() {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    if (!patientId) return
+    if (!token) return
     loadData()
-  }, [patientId])
+  }, [token])
 
   const loadData = async () => {
     try {
-      // Load patient
-      const { data: p, error: pe } = await supabase
-        .from('patient').select('name, last_name').eq('id', patientId!).single()
-      if (pe) throw new Error('Paciente no encontrado')
-      setPatient(p)
+      const { data, error: rpcError } = await supabase
+        .rpc('portal_get_bundle', { p_token: token! })
 
-      // Load active plan
-      const { data: pl } = await supabase
-        .from('nutrition_plan').select('*')
-        .eq('patient_id', patientId!).eq('is_active', true).single()
+      if (rpcError) throw new Error(rpcError.message)
+      if (!data) throw new Error('Enlace no válido o expirado')
 
-      if (pl) {
-        setPlan(pl)
-
-        // Load meals with foods
-        const { data: mealsData } = await supabase
-          .from('meal').select('*').eq('plan_id', pl.id)
-          .order('day_of_week').order('meal_type')
-
-        if (mealsData) {
-          const mealIds = mealsData.map(m => m.id)
-          const { data: foods } = await supabase
-            .from('meal_food').select('*').in('meal_id', mealIds)
-
-          const mealsWithFoods = mealsData.map(m => ({
-            ...m,
-            foods: (foods || []).filter(f => f.meal_id === m.id)
-          }))
-          setMeals(mealsWithFoods)
-        }
-      }
-
-      // Load shopping list
-      const { data: sl } = await supabase
-        .from('shopping_list').select('*')
-        .eq('patient_id', patientId!).order('created_at', { ascending: false }).limit(1).single()
-
-      if (sl) {
-        const { data: items } = await supabase
-          .from('shopping_item').select('*').eq('shopping_list_id', sl.id)
-        setShoppingList({ ...sl, items: items || [] })
-      }
-    } catch (err: any) {
-      setError(err.message || 'Error al cargar los datos')
+      const bundle = data as PortalBundle
+      setPatient(bundle.patient)
+      setPlan(bundle.plan)
+      setMeals(bundle.meals || [])
+      setShoppingList(bundle.shopping_list)
+      setMealLogs(bundle.meal_logs || [])
+      setWeekStart(bundle.week_start)
+    } catch (err) {
+      setError(getErrorMessage(err, 'Error al cargar los datos'))
     } finally {
       setLoading(false)
     }
   }
 
   const togglePurchased = async (itemId: string, current: boolean) => {
-    await supabase.from('shopping_item').update({ is_purchased: !current }).eq('id', itemId)
     setShoppingList(prev => {
       if (!prev) return prev
       return {
@@ -171,10 +161,60 @@ export function PatientPortalPage() {
         items: prev.items.map(i => i.id === itemId ? { ...i, is_purchased: !current } : i)
       }
     })
+
+    const { error: rpcError } = await supabase
+      .rpc('portal_toggle_shopping_item', { p_token: token!, p_item_id: itemId })
+
+    if (rpcError) {
+      setShoppingList(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          items: prev.items.map(i => i.id === itemId ? { ...i, is_purchased: current } : i)
+        }
+      })
+    }
   }
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }))
+  }
+
+  // Devuelve la fecha (YYYY-MM-DD) del día seleccionado de esta semana
+  const dateForDay = (day: number): string => {
+    if (!weekStart) return ''
+    const d = new Date(weekStart + 'T00:00:00')
+    d.setDate(d.getDate() + (day - 1))
+    return d.toISOString().slice(0, 10)
+  }
+
+  const getMealStatus = (mealId: string, day: number): MealStatus | null => {
+    const logDate = dateForDay(day)
+    const log = mealLogs.find(l => l.meal_id === mealId && l.log_date === logDate)
+    return log?.status ?? null
+  }
+
+  const setMealStatus = async (mealId: string, day: number, next: MealStatus | null) => {
+    const logDate = dateForDay(day)
+    const prev = mealLogs
+
+    // Optimistic update
+    setMealLogs(curr => {
+      const filtered = curr.filter(l => !(l.meal_id === mealId && l.log_date === logDate))
+      return next ? [...filtered, { meal_id: mealId, log_date: logDate, status: next }] : filtered
+    })
+
+    const { error: rpcError } = await supabase.rpc('portal_log_meal', {
+      p_token: token!,
+      p_meal_id: mealId,
+      p_log_date: logDate,
+      p_status: next,
+    })
+
+    if (rpcError) {
+      // Revertir
+      setMealLogs(prev)
+    }
   }
 
   const prevDay = () => setSelectedDay(d => (d === 1 ? 7 : d - 1))
@@ -347,35 +387,60 @@ export function PatientPortalPage() {
                       <p className="text-gray-400">No hay comidas para este día</p>
                     </div>
                   ) : (
-                    dayMeals.map(meal => (
-                      <div key={meal.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl">{mealIcons[meal.meal_type] || '🍽️'}</span>
-                            <div>
-                              <h3 className="font-semibold text-gray-900">{mealLabels[meal.meal_type] || meal.name}</h3>
-                              {meal.calories ? (
-                                <p className="text-xs text-gray-500">
-                                  {meal.calories} kcal · P:{meal.protein || 0}g · C:{meal.carbs || 0}g · G:{meal.fat || 0}g
-                                </p>
-                              ) : null}
+                    dayMeals.map(meal => {
+                      const status = getMealStatus(meal.id, selectedDay)
+                      const statusButtons: { value: MealStatus; label: string; icon: JSX.Element; activeClass: string }[] = [
+                        { value: 'completed', label: 'Hecha',  icon: <CheckCircle2 className="h-4 w-4" />, activeClass: 'bg-emerald-600 text-white border-emerald-600' },
+                        { value: 'partial',   label: 'Parcial', icon: <MinusCircle className="h-4 w-4" />, activeClass: 'bg-amber-500 text-white border-amber-500' },
+                        { value: 'missed',    label: 'No hecha', icon: <X className="h-4 w-4" />,            activeClass: 'bg-red-500 text-white border-red-500' },
+                      ]
+                      return (
+                        <div key={meal.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl">{mealIcons[meal.meal_type] || '🍽️'}</span>
+                              <div>
+                                <h3 className="font-semibold text-gray-900">{mealLabels[meal.meal_type] || meal.name}</h3>
+                                {meal.calories ? (
+                                  <p className="text-xs text-gray-500">
+                                    {meal.calories} kcal · P:{meal.protein || 0}g · C:{meal.carbs || 0}g · G:{meal.fat || 0}g
+                                  </p>
+                                ) : null}
+                              </div>
                             </div>
                           </div>
+                          <ul className="p-4 space-y-1.5">
+                            {meal.foods.length > 0 ? (
+                              meal.foods.map(food => (
+                                <li key={food.id} className="flex items-center justify-between text-sm">
+                                  <span className="text-gray-700">{food.food_name}</span>
+                                  <span className="text-gray-400 font-medium">{food.quantity} {food.unit}</span>
+                                </li>
+                              ))
+                            ) : (
+                              <li className="text-gray-400 text-sm italic">Sin alimentos detallados</li>
+                            )}
+                          </ul>
+                          <div className="border-t border-gray-100 px-4 py-3 flex gap-2">
+                            {statusButtons.map(({ value, label, icon, activeClass }) => {
+                              const isActive = status === value
+                              return (
+                                <button
+                                  key={value}
+                                  onClick={() => setMealStatus(meal.id, selectedDay, isActive ? null : value)}
+                                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                                    isActive ? activeClass : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  {icon}
+                                  {label}
+                                </button>
+                              )
+                            })}
+                          </div>
                         </div>
-                        <ul className="p-4 space-y-1.5">
-                          {meal.foods.length > 0 ? (
-                            meal.foods.map(food => (
-                              <li key={food.id} className="flex items-center justify-between text-sm">
-                                <span className="text-gray-700">{food.food_name}</span>
-                                <span className="text-gray-400 font-medium">{food.quantity} {food.unit}</span>
-                              </li>
-                            ))
-                          ) : (
-                            <li className="text-gray-400 text-sm italic">Sin alimentos detallados</li>
-                          )}
-                        </ul>
-                      </div>
-                    ))
+                      )
+                    })
                   )}
                 </div>
 
