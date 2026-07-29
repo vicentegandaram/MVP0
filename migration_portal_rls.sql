@@ -1,5 +1,11 @@
--- Portal del paciente: lectura anónima restringida
--- El patient_id en la URL actúa como token secreto (UUID)
+-- ⚠️ OBSOLETO — NO APLICAR. Sustituido por migration_portal_secure.sql.
+-- Las policies USING (true) de abajo dejaban que cualquiera con la anon key
+-- dumpeara toda la tabla `patient` y `nutrition_plan`. Si este archivo ya se
+-- aplicó en algún proyecto, migration_portal_secure.sql hace los DROP POLICY
+-- correspondientes y reemplaza el acceso por funciones RPC con token.
+
+-- Portal del paciente: lectura anónima restringida (versión vieja, insegura)
+-- El patient_id en la URL actuaba como token secreto (UUID)
 -- Solo se puede leer datos del paciente que se solicita, no de todos
 
 -- Primero eliminar policies anteriores si existen
