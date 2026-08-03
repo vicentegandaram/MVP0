@@ -358,6 +358,23 @@ export const useNutritionPlans = (patientId: string) => {
   })
 }
 
+/**
+ * ¿El profesional ya creó algún plan? Se usa para la guía de primeros pasos.
+ * Pide solo el head del conteo: no trae filas.
+ */
+export const useHasAnyPlan = () => {
+  return useQuery({
+    queryKey: ['nutritionPlans', 'any'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('nutrition_plan')
+        .select('id', { count: 'exact', head: true })
+      if (error) throw error
+      return (count ?? 0) > 0
+    },
+  })
+}
+
 export const useActiveNutritionPlan = (patientId: string) => {
   return useQuery({
     queryKey: ['nutritionPlan', 'active', patientId],

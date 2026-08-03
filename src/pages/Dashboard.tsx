@@ -1,6 +1,7 @@
 import { Users, Calendar, TrendingUp, Clock, AlertTriangle, TrendingDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { usePatients, useAppointments } from '../hooks/useApi'
+import { usePatients, useAppointments, useHasAnyPlan } from '../hooks/useApi'
+import { GettingStarted } from '../components/common/GettingStarted'
 import { supabase } from '../lib/supabase'
 import { logger } from '../lib/logger'
 import { format, isToday, differenceInDays } from 'date-fns'
@@ -26,6 +27,7 @@ const statsCards = [
 export function DashboardPage() {
   const { data: patients = [] } = usePatients()
   const { data: appointments = [] } = useAppointments()
+  const { data: hasPlans = true } = useHasAnyPlan()
   const [patientsAtRisk, setPatientsAtRisk] = useState<PatientAtRisk[]>([])
 
   useEffect(() => {
@@ -115,6 +117,8 @@ export function DashboardPage() {
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-gray-500">Resumen de tu consulta nutricional</p>
       </div>
+
+      <GettingStarted hasPatients={patients.length > 0} hasPlans={hasPlans} />
 
       {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

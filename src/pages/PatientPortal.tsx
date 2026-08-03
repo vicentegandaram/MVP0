@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactElement } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Flame, Utensils, Droplets, Activity,
@@ -389,7 +389,7 @@ export function PatientPortalPage() {
                   ) : (
                     dayMeals.map(meal => {
                       const status = getMealStatus(meal.id, selectedDay)
-                      const statusButtons: { value: MealStatus; label: string; icon: JSX.Element; activeClass: string }[] = [
+                      const statusButtons: { value: MealStatus; label: string; icon: ReactElement; activeClass: string }[] = [
                         { value: 'completed', label: 'Hecha',  icon: <CheckCircle2 className="h-4 w-4" />, activeClass: 'bg-emerald-600 text-white border-emerald-600' },
                         { value: 'partial',   label: 'Parcial', icon: <MinusCircle className="h-4 w-4" />, activeClass: 'bg-amber-500 text-white border-amber-500' },
                         { value: 'missed',    label: 'No hecha', icon: <X className="h-4 w-4" />,            activeClass: 'bg-red-500 text-white border-red-500' },

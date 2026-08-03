@@ -19,6 +19,8 @@ import { LoginPage } from './pages/Login'
 import { RegisterPage } from './pages/Register'
 import { LandingPage } from './pages/Landing'
 import { PatientPortalPage } from './pages/PatientPortal'
+import { TerminosPage } from './pages/legal/Terminos'
+import { PrivacidadPage } from './pages/legal/Privacidad'
 import { useEffect } from 'react'
 
 const queryClient = new QueryClient({
@@ -80,6 +82,14 @@ const router = createBrowserRouter([
   {
     path: '/p/:token',
     element: <PatientPortalPage />,
+  },
+  {
+    path: '/terminos',
+    element: <TerminosPage />,
+  },
+  {
+    path: '/privacidad',
+    element: <PrivacidadPage />,
   },
   {
     path: '/login',

@@ -37,7 +37,7 @@ interface AuthState {
   error: string | null
   
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string }) => Promise<void>
+  register: (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string; acceptedTermsVersion: string }) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
   loadNutritionistProfile: () => Promise<void>
@@ -69,7 +69,7 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      register: async (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string }) => {
+      register: async (email: string, password: string, profile: { name: string; lastName: string; licenseNumber?: string; acceptedTermsVersion: string }) => {
         set({ isLoading: true, error: null })
         try {
           const { data, error } = await supabase.auth.signUp({
@@ -80,6 +80,10 @@ export const useAuthStore = create<AuthState>()(
                 name: profile.name,
                 last_name: profile.lastName,
                 license_number: profile.licenseNumber || null,
+                // Deja constancia de qué versión de los términos aceptó y
+                // cuándo. El trigger lo copia a la tabla `nutritionist`.
+                accepted_terms_version: profile.acceptedTermsVersion,
+                accepted_terms_at: new Date().toISOString(),
               },
             },
           })

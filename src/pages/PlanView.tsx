@@ -30,6 +30,7 @@ import {
   useUpdateMealFood,
   useDeleteMealFood
 } from '../hooks/useApi'
+import { useAuthStore } from '../store'
 import { confirm } from '../lib/confirm'
 import type { MealFood, FoodUnit, ShoppingCategory } from '../types'
 
@@ -124,6 +125,7 @@ const defaultNewMeal: NewMealForm = {
 
 export function PlanViewPage() {
   const { patientId } = useParams<{ patientId: string }>()
+  const { nutritionist } = useAuthStore()
   const [selectedDay, setSelectedDay] = useState(1)
 
   // Edit state
@@ -321,10 +323,47 @@ export function PlanViewPage() {
         </button>
       </div>
 
-      {/* Print-only title */}
-      <div className="hidden print:block text-center pb-2 border-b">
-        <h1 className="text-xl font-bold">Plan Nutricional — {patient?.name} {patient?.last_name}</h1>
-        <p className="text-sm text-gray-500">{activePlan.name} • {format(new Date(), "d 'de' MMMM yyyy", { locale: es })}</p>
+      {/* Encabezado y pie solo para impresión: el plan sale con la marca del
+          profesional, no con la nuestra. Es lo que el paciente se lleva. */}
+      <div className="hidden print:block pb-3 mb-4 border-b border-gray-300">
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <h1 className="text-xl font-bold">Plan Nutricional</h1>
+            <p className="text-sm">
+              {patient?.name} {patient?.last_name}
+            </p>
+            <p className="text-xs text-gray-500">
+              {activePlan.name} •{' '}
+              {format(new Date(), "d 'de' MMMM yyyy", { locale: es })}
+            </p>
+          </div>
+          {nutritionist && (
+            <div className="text-right text-xs leading-snug">
+              <p className="font-semibold text-sm">
+                {nutritionist.name} {nutritionist.last_name ?? ''}
+              </p>
+              <p className="text-gray-600">Nutricionista</p>
+              {nutritionist.license_number && (
+                <p className="text-gray-500">
+                  Reg. {nutritionist.license_number}
+                </p>
+              )}
+              {nutritionist.email && (
+                <p className="text-gray-500">{nutritionist.email}</p>
+              )}
+              {nutritionist.phone && (
+                <p className="text-gray-500">{nutritionist.phone}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="hidden print:block print-footer text-[10px] text-gray-500 border-t border-gray-300 pt-2 mt-4">
+        Plan elaborado por {nutritionist?.name} {nutritionist?.last_name ?? ''}
+        {nutritionist?.license_number && ` · Reg. ${nutritionist.license_number}`}
+        . Documento de uso personal del paciente; no reemplaza la indicación
+        clínica presencial.
       </div>
 
       {/* Patient Info Banner */}

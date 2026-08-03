@@ -17,3 +17,68 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* ---------------------------------------------------------------------------
+   Impresión / "Guardar como PDF"
+   Es el entregable que el paciente se lleva, así que tiene que salir como un
+   documento y no como una captura de la aplicación.
+   --------------------------------------------------------------------------- */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
+@media print {
+  html,
+  body,
+  #root {
+    background: #fff;
+    min-height: 0;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  /* Los colores de fondo (tarjetas, badges de macros) se pierden por defecto
+     en la mayoría de los navegadores. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Nada de sombras ni animaciones sobre papel. */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Una comida no debe partirse entre dos páginas. */
+  article,
+  section,
+  .print-keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* El pie con la firma profesional se repite al final del documento. */
+  .print-footer {
+    break-before: avoid;
+  }
+
+  /* Los enlaces impresos no aportan nada si no se ve la URL. */
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuthStore } from '../store'
 import { Loader2 } from 'lucide-react'
+import { TERMS_VERSION } from './legal/entity'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -14,6 +15,7 @@ export function RegisterPage() {
     confirmPassword: '',
     licenseNumber: ''
   })
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [validationError, setValidationError] = useState('')
 
   useEffect(() => {
@@ -31,8 +33,15 @@ export function RegisterPage() {
       return
     }
 
-    if (formData.password.length < 6) {
-      setValidationError('La contraseña debe tener al menos 6 caracteres')
+    if (formData.password.length < 8) {
+      setValidationError('La contraseña debe tener al menos 8 caracteres')
+      return
+    }
+
+    if (!acceptedTerms) {
+      setValidationError(
+        'Debes aceptar los Términos de Servicio y la Política de Privacidad'
+      )
       return
     }
 
@@ -40,6 +49,7 @@ export function RegisterPage() {
       name: formData.name,
       lastName: formData.lastName,
       licenseNumber: formData.licenseNumber || undefined,
+      acceptedTermsVersion: TERMS_VERSION,
     })
   }
 
@@ -106,7 +116,7 @@ export function RegisterPage() {
                 value={formData.password}
                 onChange={(e) => setFormData({...formData, password: e.target.value})}
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 8 caracteres"
                 required
               />
             </div>
@@ -121,6 +131,35 @@ export function RegisterPage() {
                 required
               />
             </div>
+
+            <label className="flex items-start gap-3 pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="text-sm text-gray-600 leading-snug">
+                Acepto los{' '}
+                <Link
+                  to="/terminos"
+                  target="_blank"
+                  className="text-emerald-600 hover:text-emerald-700 underline"
+                >
+                  Términos de Servicio
+                </Link>{' '}
+                y la{' '}
+                <Link
+                  to="/privacidad"
+                  target="_blank"
+                  className="text-emerald-600 hover:text-emerald-700 underline"
+                >
+                  Política de Privacidad
+                </Link>
+                . Declaro ser nutricionista habilitado y ser responsable del
+                consentimiento de mis pacientes.
+              </span>
+            </label>
 
             {(error || validationError) && (
               <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
